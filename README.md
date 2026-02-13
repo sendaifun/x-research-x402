@@ -14,13 +14,13 @@ Crypto Twitter intelligence skill for [Claude Code](https://docs.anthropic.com/e
 
 ```bash
 # Recommended: installs skill + symlinks to Claude Code, Cursor, Codex, etc.
-npx skills add yashhsm/ct-alpha -g
+npx skills add sendaifun/ct-alpha -g
 
 # Or: one-liner (clones repo + interactive setup)
-curl -fsSL https://raw.githubusercontent.com/yashhsm/ct-alpha/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sendaifun/ct-alpha/main/install.sh | bash
 
 # Or: manual
-git clone https://github.com/yashhsm/ct-alpha.git ~/ct-alpha
+git clone https://github.com/sendaifun/ct-alpha.git ~/ct-alpha
 cd ~/ct-alpha && bun run install.ts
 ```
 

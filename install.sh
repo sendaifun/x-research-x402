@@ -3,7 +3,7 @@
 # CT Alpha — One-line installer
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/yashhsm/ct-alpha/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/sendaifun/ct-alpha/main/install.sh | bash
 #
 # What it does:
 #   1. Checks for / installs Bun
@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-REPO="https://github.com/yashhsm/ct-alpha.git"
+REPO="https://github.com/sendaifun/ct-alpha.git"
 INSTALL_DIR="$HOME/ct-alpha"
 
 echo ""
