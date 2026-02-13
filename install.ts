@@ -23,7 +23,8 @@ const SKILL_SOURCE = join(CT_ALPHA_DIR, "SKILL.md");
 const ENV_DIR = `${process.env.HOME}/.config/env`;
 const ENV_FILE = `${ENV_DIR}/global.env`;
 const SKILLS_DIR = `${process.env.HOME}/.claude/skills`;
-const SKILL_DEST = `${SKILLS_DIR}/ct-alpha.skill`;
+const SKILL_DEST_DIR = `${SKILLS_DIR}/ct-alpha`;
+const SKILL_DEST = `${SKILL_DEST_DIR}/SKILL.md`;
 
 function log(msg: string) { console.log(`  ${msg}`); }
 function ok(msg: string) { console.log(`  ✅ ${msg}`); }
@@ -163,13 +164,13 @@ async function main() {
   console.log("");
   log("Installing Claude Code skill...");
 
-  if (!existsSync(SKILLS_DIR)) {
-    mkdirSync(SKILLS_DIR, { recursive: true });
+  if (!existsSync(SKILL_DEST_DIR)) {
+    mkdirSync(SKILL_DEST_DIR, { recursive: true });
   }
 
   if (existsSync(SKILL_SOURCE)) {
     copyFileSync(SKILL_SOURCE, SKILL_DEST);
-    ok(`Skill installed to ${SKILL_DEST}`);
+    ok(`Skill installed to ${SKILL_DEST_DIR}/`);
   } else {
     warn("ct-alpha.skill not found in repo. Skill auto-routing won't work.");
     log("You can still use the CLI directly: bun run ~/ct-alpha/ct-search.ts");
