@@ -11,15 +11,15 @@
  *   bun run ct-search.ts cost [--reset]
  */
 
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, openSync, readSync, closeSync } from "fs";
 import { join } from "path";
-import { searchRecent, sortTweets, dedupe, getThread, getProfile, type Tweet } from "./lib/api";
+import { searchRecent, dedupe, getThread, type Tweet } from "./lib/api";
 import * as cache from "./lib/cache";
 import { appendNoiseFilters, applyEngagementFilter } from "./lib/filters";
-import { rankTweets, detectRaids, computeTrendingScore, type RankedTweet } from "./lib/tweetrank";
-import { extractTickers, extractCryptoUrls, extractContractAddresses, aggregateMentions, extractAllSignals } from "./lib/extract";
+import { rankTweets, detectRaids, type RankedTweet } from "./lib/tweetrank";
+import { extractCryptoUrls, extractContractAddresses, aggregateMentions } from "./lib/extract";
 import { formatSearchResults, formatTrending, formatContractAddresses, formatCryptoUrls, formatWatchlist, formatThread } from "./lib/format";
-import { getSummary, reset as resetCost, estimateCost } from "./lib/cost";
+import { getSummary, reset as resetCost } from "./lib/cost";
 
 // --- Arg Parsing ---
 
@@ -57,9 +57,10 @@ interface WatchlistEntry {
 
 function loadWatchlist(): WatchlistEntry[] {
   const entries: WatchlistEntry[] = [];
+  const seen = new Set<string>();
   const dir = join(import.meta.dir, "data");
 
-  // Load default watchlist
+  // Load default watchlist first, then user overrides
   for (const file of ["watchlist.default.json", "watchlist.json"]) {
     const fp = join(dir, file);
     if (!existsSync(fp)) continue;
@@ -68,8 +69,12 @@ function loadWatchlist(): WatchlistEntry[] {
       if (data.categories) {
         for (const [cat, info] of Object.entries(data.categories) as [string, any][]) {
           for (const account of info.accounts || []) {
-            const username = typeof account === "string" ? account : account.username;
-            if (username) entries.push({ username: username.toLowerCase().replace("@", ""), category: cat });
+            const username = (typeof account === "string" ? account : account.username)
+              ?.toLowerCase().replace("@", "");
+            if (username && !seen.has(username)) {
+              seen.add(username);
+              entries.push({ username, category: cat });
+            }
           }
         }
       }
@@ -81,6 +86,73 @@ function loadWatchlist(): WatchlistEntry[] {
 
 function watchlistSet(): Set<string> {
   return new Set(loadWatchlist().map(e => e.username));
+}
+
+// --- Token Onboarding ---
+
+const ENV_DIR = `${process.env.HOME}/.config/env`;
+const ENV_FILE = `${ENV_DIR}/global.env`;
+
+function promptStdin(question: string): string {
+  process.stdout.write(question);
+  const buf = Buffer.alloc(4096);
+  const fd = openSync("/dev/stdin", "r");
+  const bytesRead = readSync(fd, buf, 0, 4096, null);
+  closeSync(fd);
+  return buf.toString("utf-8", 0, bytesRead).trim();
+}
+
+function hasToken(): boolean {
+  if (process.env.X_BEARER_TOKEN) return true;
+  try {
+    const content = readFileSync(ENV_FILE, "utf-8");
+    const match = content.match(/X_BEARER_TOKEN=["']?([^"'\n]+)/);
+    if (match) {
+      // Load it into process.env so api.ts picks it up
+      process.env.X_BEARER_TOKEN = match[1];
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+function ensureToken(): void {
+  if (hasToken()) return;
+
+  console.log("");
+  console.log("  Welcome to CT Alpha! You need an X API Bearer Token to get started.");
+  console.log("");
+  console.log("  Get one at: https://developer.x.com (pay-per-use via xAI)");
+  console.log("  Cost: ~$0.005 per tweet read (~$0.10 per search)");
+  console.log("");
+
+  const token = promptStdin("  Enter your X_BEARER_TOKEN: ");
+
+  if (!token) {
+    console.error("\n  No token provided. CT Alpha needs an X API token to work.");
+    console.error("  Set X_BEARER_TOKEN as an env var or re-run this command to try again.\n");
+    process.exit(1);
+  }
+
+  // Save to env file
+  if (!existsSync(ENV_DIR)) {
+    mkdirSync(ENV_DIR, { recursive: true });
+  }
+
+  let envContent = "";
+  if (existsSync(ENV_FILE)) {
+    envContent = readFileSync(ENV_FILE, "utf-8");
+  }
+
+  if (!envContent.includes("X_BEARER_TOKEN")) {
+    envContent += `${envContent && !envContent.endsWith("\n") ? "\n" : ""}export X_BEARER_TOKEN="${token}"\n`;
+    writeFileSync(ENV_FILE, envContent);
+    console.log(`\n  Token saved to ${ENV_FILE}`);
+  }
+
+  // Set for current session
+  process.env.X_BEARER_TOKEN = token;
+  console.log("  Ready to go!\n");
 }
 
 // --- Commands ---
@@ -96,6 +168,7 @@ async function cmdSearch(positional: string[], flags: Record<string, string | bo
   const sort = (flags.sort as string) || "relevancy";
   const since = (flags.since as string) || "24h";
   const minLikes = flags["min-likes"] ? parseInt(flags["min-likes"] as string) : (isQuick ? 3 : 0);
+  const limit = flags.limit ? parseInt(flags.limit as string) : (isQuick ? 20 : 100);
   const from = flags.from as string;
   const extractTickersFlag = !!flags["extract-tickers"];
   const extractCasFlag = !!flags["extract-cas"];
@@ -110,13 +183,13 @@ async function cmdSearch(positional: string[], flags: Record<string, string | bo
   fullQuery = appendNoiseFilters(fullQuery, isQuick);
   if (!fullQuery.includes("lang:")) fullQuery += " lang:en";
 
-  // Search
-  const maxPages = isQuick ? 1 : parseInt(flags.pages as string) || 3;
+  // --limit is the total cap. Quick: 20 tweets (1 page). Full: up to 100 (auto-pages).
+  const maxPages = isQuick ? 1 : Math.ceil(limit / 100);
   const result = await searchRecent(fullQuery, {
-    sort: sort as "recency" | "relevancy",
+    sort: sort as any,
     since,
     maxPages,
-    maxResults: 100,
+    maxResults: limit,
   });
 
   // Apply engagement filter
@@ -170,18 +243,25 @@ async function cmdTrending(flags: Record<string, string | boolean>) {
   const solanaOnly = !!flags["solana-only"];
   const top = flags.top ? parseInt(flags.top as string) : 20;
 
-  // Search for cashtags and crypto terms in recent window
-  const queries = [
-    `$ -is:retweet lang:en`,
-    `(pump.fun OR dexscreener OR birdeye) -is:retweet lang:en`,
-  ];
+  // Search for crypto terms in recent window (multi-query for coverage)
+  const baseQueries = solanaOnly
+    ? [
+        `(solana OR $SOL) (alpha OR strategy OR buy OR bullish OR launch) -is:retweet lang:en`,
+        `(pump.fun OR dexscreener OR birdeye) solana -is:retweet lang:en`,
+      ]
+    : [
+        `(crypto OR defi OR web3) (alpha OR trending OR bullish OR launch OR pump) -is:retweet lang:en`,
+        `(pump.fun OR dexscreener OR birdeye OR uniswap) -is:retweet lang:en`,
+        `(solana OR ethereum OR bitcoin) (buy OR strategy OR yield OR airdrop) -is:retweet lang:en`,
+      ];
+  const queries = baseQueries;
 
   let allTweets: Tweet[] = [];
   let totalRaw = 0;
   let anyCached = false;
 
   for (const q of queries) {
-    const result = await searchRecent(q, { since: window, maxPages: 1, sort: "recency" });
+    const result = await searchRecent(q, { since: window, maxPages: 1, sort: "recency", maxResults: 30 });
     allTweets.push(...result.tweets);
     totalRaw += result.rawCount;
     if (result.cached) anyCached = true;
@@ -320,9 +400,10 @@ ct-search: Crypto Twitter intelligence CLI
 
 Commands:
   search "<query>" [flags]   Search CT with TweetRank scoring
-    --quick                  1 page, 100 tweets max, 1hr cache (default)
-    --full                   Up to 3 pages, 15min cache
-    --sort <field>           Sort: likes, retweets, recency, relevancy (default: relevancy)
+    --quick                  20 tweets, 1hr cache (default, ~$0.10)
+    --full                   Up to 100 tweets, 15min cache (~$0.50)
+    --limit <n>              Max total tweets (default: 20 quick, 100 full)
+    --sort <field>           Sort: likes, retweets, bookmarks, recency, relevancy (default: relevancy)
     --since <duration>       Time window: 1h, 6h, 24h, 7d (default: 24h)
     --min-likes <n>          Min likes filter (default: 3 for quick)
     --from <users>           Comma-separated usernames to restrict
@@ -346,9 +427,9 @@ Commands:
   cost [--reset]             Show API credit usage (--reset clears all)
 
 Environment:
-  X_BEARER_TOKEN             Required. Set as env var or in ~/.config/env/global.env
+  X_BEARER_TOKEN             Required. You'll be prompted on first run if not set.
 
-Cost: ~$0.50 per quick search (100 tweets × $0.005). Always starts in quick mode.
+Cost: ~$0.10 per quick search (20 tweets × $0.005). Use --limit to control.
 `);
 }
 
@@ -359,6 +440,12 @@ async function main() {
   cache.prune();
 
   const { command, positional, flags } = parseArgs(process.argv);
+
+  // Commands that need an API token
+  const apiCommands = new Set(["search", "trending", "watchlist", "thread"]);
+  if (apiCommands.has(command)) {
+    ensureToken();
+  }
 
   try {
     switch (command) {

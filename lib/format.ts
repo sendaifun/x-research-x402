@@ -57,6 +57,7 @@ function riskBullet(tweet: RankedTweet): string {
 
 function formatTweet(tweet: RankedTweet, index: number): string {
   const label = `[${tweet.sourceLabel}]`;
+  const articleTag = tweet.is_article ? " 📝 ARTICLE" : "";
   const rank = `TR:${tweet.tweetRank.toFixed(1)}`;
   const cred = `Cred:${tweet.authorCred.toFixed(1)}`;
 
@@ -68,9 +69,10 @@ function formatTweet(tweet: RankedTweet, index: number): string {
   ].join(" ");
 
   const risk = riskBullet(tweet);
+  const maxText = tweet.is_article ? 500 : 280;
   const lines = [
-    `**${index + 1}.** ${label} @${tweet.username} · ${timeAgo(tweet.created_at)} · ${rank} · ${cred}`,
-    `   ${truncate(tweet.text.replace(/\n/g, " "), 280)}`,
+    `**${index + 1}.** ${label}${articleTag} @${tweet.username} · ${timeAgo(tweet.created_at)} · ${rank} · ${cred}`,
+    `   ${truncate(tweet.text.replace(/\n/g, " "), maxText)}`,
     `   ${engagement} · 👁${tweet.metrics.impressions.toLocaleString()} views`,
     `   ${tweet.tweet_url}`,
   ];
@@ -236,21 +238,3 @@ export function formatThread(
   return [...header, ...tweetLines].join("\n\n");
 }
 
-// --- Format tool discovery suggestions ---
-
-export function formatToolSuggestions(suggestions: { tool: string; reason: string; command: string }[]): string {
-  if (suggestions.length === 0) return "";
-
-  const lines = [
-    "",
-    "### Suggested Next Steps (based on available tools)",
-    "",
-  ];
-
-  for (const s of suggestions) {
-    lines.push(`- **${s.tool}**: ${s.reason}`);
-    lines.push(`  → \`${s.command}\``);
-  }
-
-  return lines.join("\n");
-}

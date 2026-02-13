@@ -1,57 +1,41 @@
-# CT Alpha
+# ct-alpha
 
-Crypto Twitter intelligence skill for Claude Code. Turns X/Twitter into an actionable research layer for crypto investment decisions.
+Crypto Twitter intelligence skill for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Turns X/Twitter into a structured research layer for crypto narratives, tokens, and strategies.
 
-## Features
+## What it does
 
-- **TweetRank**: PageRank-inspired credibility scoring. Weights bookmarks (unfakeable) over likes (bottable). Detects coordinated shill raids.
-- **Multi-signal token detection**: Catches tokens via cashtags, plain names, pump.fun/dexscreener URLs, and contract addresses.
-- **Smart CA extraction**: Context-window scoring reduces false positives. Labels everything UNVERIFIED.
-- **Dynamic tool discovery**: Suggests follow-up actions using whatever MCP tools you have (DeFi Llama, Backpack, Polymarket, etc.).
-- **Cost-optimized**: Quick mode default (~$0.50/search), aggressive caching, auto noise filters.
+- **TweetRank** — PageRank-inspired credibility scoring. Weights bookmarks > quotes > likes > retweets. Detects coordinated shill raids.
+- **Multi-signal token detection** — Cashtags, plain name phrases, pump.fun/dexscreener URLs, contract addresses with context-window scoring.
+- **X article support** — Full text extraction for long-form posts (>280 chars) at no extra API cost.
+- **Tool discovery** — Suggests follow-up actions using available MCP tools (DeFi Llama, Backpack, Polymarket).
+- **Cost-optimized** — Quick mode default (~$0.10/search, 20 tweets), aggressive caching, auto noise filters.
 
 ## Install
 
 ```bash
-# Clone to your skills directory
-git clone https://github.com/<owner>/ct-alpha.git ~/.claude/skills/ct-alpha
+# Option 1: skills.sh
+npx skills add yashhsm/ct-alpha
 
-# Or clone anywhere and symlink
-git clone https://github.com/<owner>/ct-alpha.git ~/ct-alpha
-ln -s ~/ct-alpha ~/.claude/skills/ct-alpha
+# Option 2: one-liner
+curl -fsSL https://raw.githubusercontent.com/yashhsm/ct-alpha/main/install.sh | bash
+
+# Option 3: manual
+git clone https://github.com/yashhsm/ct-alpha.git ~/ct-alpha
+cd ~/ct-alpha && bun run install.ts
 ```
 
-## Setup
-
-```bash
-cd ~/ct-alpha  # or ~/.claude/skills/ct-alpha
-bun run setup.ts
-```
-
-This will:
-1. Check for Bun and X API credentials
-2. Prompt for your `X_BEARER_TOKEN` if not set
-3. Ask for 3 favorite CT accounts to seed your watchlist
-
-### Manual credential setup
-
-```bash
-mkdir -p ~/.config/env
-echo 'export X_BEARER_TOKEN="your_token_here"' >> ~/.config/env/global.env
-```
-
-Get your token from [X Developer Portal](https://developer.x.com) (pay-per-use via xAI).
+Token is prompted on first run if not set. No separate setup step needed.
 
 ## Usage
 
-### In Claude Code
+### Claude Code (auto-routed via skill)
 ```
-/ct-alpha what's CT saying about Pendle?
-/ct-alpha trending tokens on Solana
-/ct-alpha find yield strategies for JTO
+"what's CT saying about Pendle?"
+"trending tokens on Solana"
+"find yield strategies for JTO"
 ```
 
-### Direct CLI
+### CLI
 ```bash
 # Search
 bun run ct-search.ts search "$SOL alpha" --quick --extract-tickers
@@ -63,26 +47,45 @@ bun run ct-search.ts trending --window 6h --solana-only
 bun run ct-search.ts watchlist --since 24h
 
 # Thread hydration
-bun run ct-search.ts thread 1234567890
+bun run ct-search.ts thread <tweet_id>
 
-# Check API spending
+# API spend
 bun run ct-search.ts cost
 ```
 
 ## Cost
 
-X API charges $0.005 per tweet read via xAI pay-per-use.
+X API charges $0.005/tweet via xAI pay-per-use.
 
-| Operation | Est. Cost |
-|-----------|-----------|
-| Quick search (100 tweets) | ~$0.50 |
-| Full search (300 tweets) | ~$1.50 |
-| Trending scan | ~$1.00 |
-| Watchlist (50 accounts) | ~$2.50 |
+| Operation | Tweets | Cost |
+|---|---|---|
+| Quick search (default) | 20 | ~$0.10 |
+| Full search (`--full`) | up to 100 | ~$0.50 |
+| Trending scan | 2-3 queries x 30 | ~$0.30-0.45 |
 
-Quick mode is always the default. The CLI displays cost after every operation.
+Quick mode is always default. Cost displayed after every operation.
+
+## Architecture
+
+```
+ct-search.ts          CLI entry point + inline token onboarding
+lib/
+  api.ts              X API v2 wrapper (search, threads, profiles)
+  tweetrank.ts        Credibility scoring + raid detection
+  extract.ts          Multi-signal extraction (tickers, CAs, URLs, name-phrases)
+  filters.ts          Crypto noise filters + engagement thresholds
+  cache.ts            File-based MD5 caching with TTL tiers
+  cost.ts             Credit tracking
+  format.ts           Structured output with trust labels
+data/
+  watchlist.default.json   Default CT accounts (shipped)
+  known-tokens.json        Token name-to-ticker mappings
+SKILL.md              Skill definition (skills.sh compatible)
+install.ts            Interactive installer
+install.sh            One-line shell installer
+```
 
 ## Requirements
 
-- [Bun](https://bun.sh) (v1.0+)
-- X API Bearer Token (xAI pay-per-use)
+- [Bun](https://bun.sh) v1.0+
+- X API Bearer Token ([developer.x.com](https://developer.x.com), pay-per-use via xAI)

@@ -13,6 +13,7 @@ export interface Tweet {
   name: string;
   created_at: string;
   conversation_id: string;
+  is_article: boolean;
   metrics: {
     likes: number;
     retweets: number;
@@ -100,6 +101,16 @@ async function apiGet(url: string): Promise<RawApiResponse> {
 
 // --- Tweet Parsing ---
 
+function dedupeByField(arr: any[], field: string): any[] {
+  const seen = new Set<string>();
+  return arr.filter((item) => {
+    const val = item[field];
+    if (!val || seen.has(val)) return false;
+    seen.add(val);
+    return true;
+  });
+}
+
 function parseTweets(response: RawApiResponse): Tweet[] {
   if (!response.data) return [];
 
@@ -114,15 +125,35 @@ function parseTweets(response: RawApiResponse): Tweet[] {
     const user = usersMap.get(t.author_id) || {};
     const metrics = t.public_metrics || {};
     const entities = t.entities || {};
+    const noteTweet = t.note_tweet;
+
+    // Use full article text when available (note_tweet = long-form posts > 280 chars)
+    const fullText = noteTweet?.text || t.text;
+
+    // Merge entities: note_tweet entities are more complete for long-form posts
+    const noteEntities = noteTweet?.entities || {};
+    const mergedUrls = dedupeByField(
+      [...(noteEntities.urls || []), ...(entities.urls || [])],
+      "expanded_url"
+    );
+    const mergedMentions = dedupeByField(
+      [...(noteEntities.mentions || []), ...(entities.mentions || [])],
+      "username"
+    );
+    const mergedHashtags = dedupeByField(
+      [...(noteEntities.hashtags || []), ...(entities.hashtags || [])],
+      "tag"
+    );
 
     return {
       id: t.id,
-      text: t.text,
+      text: fullText,
       author_id: t.author_id,
       username: user.username || "unknown",
       name: user.name || "Unknown",
       created_at: t.created_at,
       conversation_id: t.conversation_id,
+      is_article: !!noteTweet,
       metrics: {
         likes: metrics.like_count || 0,
         retweets: metrics.retweet_count || 0,
@@ -131,9 +162,9 @@ function parseTweets(response: RawApiResponse): Tweet[] {
         impressions: metrics.impression_count || 0,
         bookmarks: metrics.bookmark_count || 0,
       },
-      urls: (entities.urls || []).map((u: any) => u.expanded_url || u.url).filter(Boolean),
-      mentions: (entities.mentions || []).map((m: any) => m.username).filter(Boolean),
-      hashtags: (entities.hashtags || []).map((h: any) => h.tag).filter(Boolean),
+      urls: mergedUrls.map((u: any) => u.expanded_url || u.url).filter(Boolean),
+      mentions: mergedMentions.map((m: any) => m.username).filter(Boolean),
+      hashtags: mergedHashtags.map((h: any) => h.tag).filter(Boolean),
       tweet_url: `https://x.com/${user.username || "i"}/status/${t.id}`,
       author: {
         id: user.id || t.author_id,
@@ -151,34 +182,48 @@ function parseTweets(response: RawApiResponse): Tweet[] {
 
 // --- Core fields for all tweet requests ---
 
-const TWEET_FIELDS = "created_at,public_metrics,author_id,conversation_id,entities";
+const TWEET_FIELDS = "created_at,public_metrics,author_id,conversation_id,entities,note_tweet";
 const USER_FIELDS = "username,name,verified,public_metrics,created_at";
 const EXPANSIONS = "author_id";
 
 // --- Search ---
 
+// API only accepts these sort values; anything else must be done locally
+const API_SORT_VALUES = new Set(["recency", "relevancy"]);
+
 export async function searchRecent(
   query: string,
   opts: SearchOptions = {}
 ): Promise<{ tweets: Tweet[]; rawCount: number; cached: boolean }> {
-  const sort = opts.sort || "relevancy";
-  const maxPages = opts.maxPages || 1;
-  const maxResults = Math.min(opts.maxResults || 100, 100);
+  const requestedSort = opts.sort || "relevancy";
+  // Use relevancy for API call if the requested sort isn't API-supported
+  const apiSort = API_SORT_VALUES.has(requestedSort) ? requestedSort : "relevancy";
+  const localSort = API_SORT_VALUES.has(requestedSort) ? null : requestedSort;
 
-  // Build time range
+  // --limit is a total cap. Compute pages and per-page size from it.
+  // API requires 10-100 per page.
+  const totalLimit = opts.maxResults || 100;
+  const maxPages = Math.min(opts.maxPages || 1, Math.ceil(totalLimit / 10));
+  const maxResults = Math.max(10, Math.min(totalLimit, 100)); // API: 10-100 per page
+
+  // Build time range — bucket to the hour for cache stability
+  const since = opts.since || "";
   let startTime = opts.startTime;
-  if (!startTime && opts.since) {
-    const match = opts.since.match(/^(\d+)(h|d)$/);
+  if (!startTime && since) {
+    const match = since.match(/^(\d+)(h|d)$/);
     if (match) {
       const val = parseInt(match[1]);
       const unit = match[2];
       const ms = unit === "h" ? val * 3600000 : val * 86400000;
-      startTime = new Date(Date.now() - ms).toISOString();
+      // Bucket to the hour so cache keys are stable within the same hour
+      const raw = Date.now() - ms;
+      startTime = new Date(raw - (raw % 3600000)).toISOString();
     }
   }
 
-  // Cache check
-  const ck = cache.cacheKey("search", { query, sort, maxPages, maxResults, startTime });
+  // Cache check — key on `since` string (not computed startTime) for stable cache hits
+  const cacheKeyTime = opts.startTime || since || "";
+  const ck = cache.cacheKey("search", { query, sort: requestedSort, maxPages, maxResults, since: cacheKeyTime });
   const cached = cache.get<{ tweets: Tweet[]; rawCount: number }>(ck);
   if (cached) {
     return { ...cached, cached: true };
@@ -196,7 +241,7 @@ export async function searchRecent(
       "tweet.fields": TWEET_FIELDS,
       "user.fields": USER_FIELDS,
       expansions: EXPANSIONS,
-      sort_order: sort,
+      sort_order: apiSort,
     });
 
     if (startTime) params.set("start_time", startTime);
@@ -209,10 +254,16 @@ export async function searchRecent(
     rawCount += response.meta?.result_count || 0;
     allTweets.push(...tweets);
 
+    // Stop if we've hit the total limit
+    if (allTweets.length >= totalLimit) break;
+
     nextToken = response.meta?.next_token;
     if (!nextToken) break;
     if (page < maxPages - 1) await sleep(RATE_DELAY_MS);
   }
+
+  // Trim to total limit
+  if (allTweets.length > totalLimit) allTweets.length = totalLimit;
 
   // Deduplicate
   const seen = new Set<string>();
@@ -222,14 +273,20 @@ export async function searchRecent(
     return true;
   });
 
+  // Local re-sort if requested sort isn't API-supported
+  let finalTweets = deduped;
+  if (localSort) {
+    finalTweets = sortTweets(deduped, localSort as any);
+  }
+
   // Record cost
   recordUsage(rawCount, query);
 
   // Cache result
   const ttl = maxPages === 1 ? cache.TTL.QUICK : cache.TTL.FULL;
-  cache.set(ck, { tweets: deduped, rawCount }, ttl);
+  cache.set(ck, { tweets: finalTweets, rawCount }, ttl);
 
-  return { tweets: deduped, rawCount, cached: false };
+  return { tweets: finalTweets, rawCount, cached: false };
 }
 
 // --- Thread ---

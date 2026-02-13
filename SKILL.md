@@ -5,12 +5,15 @@ description: >
   real-time crypto narratives, trending tokens, yield strategies, smart money signals,
   and protocol research. Features TweetRank (PageRank-inspired credibility scoring),
   multi-signal token detection (cashtags + name-phrases + crypto URLs + contract addresses),
-  coordinated raid detection, and dynamic tool discovery for execution suggestions.
+  coordinated raid detection, X article (long-form post) support, and dynamic tool
+  discovery for execution suggestions.
   Use when: (1) user says "ct alpha", "what's CT saying", "trending on crypto twitter",
   "find alpha on", "search CT for", "what are people saying about [token]",
-  "crypto twitter research", "/ct-alpha", (2) user wants to research crypto narratives,
-  tokens, protocols, yield strategies, or market sentiment using Twitter/X data,
-  (3) user wants to find trending tokens, new narratives, or smart money signals.
+  "crypto twitter research", "/ct-alpha", "what's hot in crypto", "CT sentiment",
+  (2) user wants to research crypto narratives, tokens, protocols, yield strategies,
+  or market sentiment using Twitter/X data,
+  (3) user wants to find trending tokens, new narratives, or smart money signals,
+  (4) user asks about any specific token, protocol, or crypto topic and wants CT perspective.
   NOT for: posting tweets, account management, or non-crypto research.
   Solana-first but covers all major chains. X API is pay-per-use ($0.005/tweet) —
   always minimize API calls.
@@ -20,9 +23,9 @@ description: >
 
 ## Overview
 
-CT Alpha turns X/Twitter into an actionable crypto intelligence layer. It searches CT for narratives, alpha, strategies, and sentiment, then ranks results using TweetRank (a PageRank-inspired credibility scoring system), extracts tokens/CAs from multiple signals, detects coordinated raids, and suggests execution steps using whatever tools the user has available.
+CT Alpha turns X/Twitter into an actionable crypto intelligence layer. It searches CT for narratives, alpha, strategies, and sentiment, then ranks results using TweetRank (a PageRank-inspired credibility scoring system), extracts tokens/CAs from multiple signals, detects coordinated raids, fetches full X articles (long-form posts), and suggests execution steps using whatever tools the user has available.
 
-**Cost awareness**: X API charges ~$0.50 per quick search (100 tweets). Always start with `--quick` mode. Never run expensive queries without user confirmation.
+**Cost awareness**: X API charges ~$0.10 per quick search (20 tweets). Relevancy sort means top results come first — fetching 20 is often better signal than 100. Always start with `--quick` mode. Never run expensive queries without user confirmation.
 
 ## Environment Setup
 
@@ -43,12 +46,13 @@ The skill directory is at `~/ct-alpha/`. All CLI commands run from there.
 
 ### search — Core research command
 ```bash
-bun run ~/ct-alpha/ct-search.ts search "<query>" [flags]
+source ~/.config/env/global.env 2>/dev/null && bun run ~/ct-alpha/ct-search.ts search "<query>" [flags]
 ```
 
 Flags:
-- `--quick` — 1 page, 100 tweets max, 1hr cache (DEFAULT — always use this first)
-- `--full` — Up to 3 pages, 15min cache (confirm cost with user first)
+- `--quick` — 20 tweets, 1hr cache, ~$0.10 (DEFAULT — always use this first)
+- `--full` — Up to 3 pages, 15min cache, ~$0.50-1.50 (confirm cost with user first)
+- `--limit N` — Override max tweets (default: 20 quick, 100 full)
 - `--sort likes|recency|relevancy` — Sort order (default: relevancy)
 - `--since 1h|6h|24h|7d` — Time window (default: 24h)
 - `--min-likes N` — Engagement filter (default: 3 for quick)
@@ -59,7 +63,7 @@ Flags:
 
 ### trending — Multi-signal trending detection
 ```bash
-bun run ~/ct-alpha/ct-search.ts trending [flags]
+source ~/.config/env/global.env 2>/dev/null && bun run ~/ct-alpha/ct-search.ts trending [flags]
 ```
 
 Flags:
@@ -70,7 +74,7 @@ Flags:
 
 ### watchlist — Monitor CT accounts
 ```bash
-bun run ~/ct-alpha/ct-search.ts watchlist [flags]
+source ~/.config/env/global.env 2>/dev/null && bun run ~/ct-alpha/ct-search.ts watchlist [flags]
 ```
 
 Flags:
@@ -79,12 +83,12 @@ Flags:
 
 ### thread — Hydrate conversation thread
 ```bash
-bun run ~/ct-alpha/ct-search.ts thread <tweet_id>
+source ~/.config/env/global.env 2>/dev/null && bun run ~/ct-alpha/ct-search.ts thread <tweet_id>
 ```
 
 ### cost — Track API spending
 ```bash
-bun run ~/ct-alpha/ct-search.ts cost [--reset]
+source ~/.config/env/global.env 2>/dev/null && bun run ~/ct-alpha/ct-search.ts cost [--reset]
 ```
 
 ## Research Methodology
@@ -93,21 +97,22 @@ Follow this 6-step loop for every research request:
 
 ### 1. Decompose
 Break the user's question into 1-3 targeted search queries.
-- Use query templates from `references/query-templates.md`
-- For token research: search both `$TICKER` and plain name with OR
+- For token research: search both `$TICKER` and plain name with OR (e.g., `"$PENDLE" OR "pendle"`)
 - For narratives: search thematic keywords, not just token names
+- For strategies: include strategy/yield/APY keywords
+- For sentiment: include bullish/bearish/buy/sell keywords
 
 ### 2. Pre-Filter
 Before making any API call:
 - **Check cache**: Run `--quick` first. If cached results exist, analyze those.
-- **Add noise filters**: The CLI auto-appends crypto noise filters.
-- **Estimate cost**: Quick = ~$0.50, Full = ~$1.50. Tell user before full mode.
+- **Add noise filters**: The CLI auto-appends crypto noise filters (-is:retweet, -airdrop, -giveaway, etc.)
+- **Estimate cost**: Quick = ~$0.10, Full = ~$0.50-1.50. Tell user before full mode.
 - **Narrow time window**: Default 24h for trending, 7d for research.
 
 ### 3. Search
 Execute with `--quick` mode (always the first pass):
 ```bash
-bun run ~/ct-alpha/ct-search.ts search "$TOKEN alpha" --quick --extract-tickers
+source ~/.config/env/global.env 2>/dev/null && bun run ~/ct-alpha/ct-search.ts search "$TOKEN alpha" --quick --extract-tickers
 ```
 
 ### 4. Extract
@@ -116,6 +121,7 @@ Results include TweetRank scores and trust labels:
 - `[HIGH-CRED]` — Author has high credibility score
 - `[UNKNOWN]` — Unverified author
 - `[SUSPICIOUS]` — Bot-like patterns detected
+- `ARTICLE` — Long-form X post (full text captured)
 
 Look for extracted tickers, contract addresses, and crypto URLs.
 
@@ -131,6 +137,7 @@ Combine findings into actionable intelligence:
 - Highlight tickers with strong multi-signal detection (cashtag + URL + name-phrase)
 - Flag raid risks (high low-cred author ratio)
 - Suggest verification and execution steps using available tools
+- Cross-reference with DeFi Llama (TVL, yields, fees), Backpack (price, depth), Polymarket (prediction markets)
 
 ## Refinement Heuristics
 
@@ -143,6 +150,7 @@ Combine findings into actionable intelligence:
 - Broaden query: use OR with alternative terms
 - Extend window: `--since 7d`
 - Remove restrictive keywords
+- Lower min-likes: `--min-likes 0`
 
 **Need expert takes?**
 - Use `--from` with known analysts from watchlist
@@ -150,18 +158,24 @@ Combine findings into actionable intelligence:
 
 **Detecting spam/raids?**
 - Check the TweetRank source labels
-- Look for `⚠️ RAID` flags in trending output
+- Look for RAID flags in trending output
 - Low unique-author count = suspicious
 
 ## Dynamic Tool Discovery
 
-After completing research, check what other tools the user has available and suggest execution steps. See `references/tool-discovery.md` for the full mapping.
+After completing research, check what other tools the user has available and suggest execution steps. Look for these MCP tool prefixes:
+
+- **mcp__defillama__*** → Check TVL, yields, fees, prices, protocol comparison
+- **mcp__backpack__*** → Check exchange price, depth, trades, klines
+- **mcp__polymarket__*** → Check prediction markets for related narratives
+- **mcp__postgres-mcp__*** → Query on-chain data if available
 
 Common patterns:
-- Token found → check TVL/price via DeFi Llama, check exchange depth via Backpack
+- Token found → `get_protocol_tvl`, `get_current_prices`, `backpack_get_ticker`
 - CA found → suggest verification on Solscan/Etherscan, rug check if available
-- Narrative detected → check related prediction markets via Polymarket
-- Strategy found → check current yields via DeFi Llama yield pools
+- Narrative detected → `search_polymarket` for prediction market odds
+- Strategy found → `get_top_yield_pools` for current APYs
+- Protocol comparison → `compare_protocols` side by side
 
 **Always frame suggestions as "verify" not "confirm"** — encourage skepticism about CT alpha.
 
@@ -175,11 +189,12 @@ Every result includes trust metadata. Never present CT findings as authoritative
 
 ## Cost Protocol
 
-1. **Always `--quick` first** (~$0.50)
-2. Display cost estimate before `--full` mode (~$1.50+)
-3. Watchlist scans can be expensive with many accounts — warn user
-4. Cache is aggressive (1hr for quick mode) — same query is free within TTL
-5. Show `cost` summary if user asks about spending
+1. **Always `--quick` first** (~$0.10 for 20 tweets). Relevancy sort = best results come first.
+2. Only use `--limit 30` or `--limit 50` if 20 results are genuinely insufficient.
+3. Display cost estimate before `--full` mode (~$0.50-1.50).
+4. Cache is aggressive (1hr for quick mode) — same query is free within TTL.
+5. **Two-pass strategy**: First search with 20 results. If the user needs more depth on a specific sub-topic, do a targeted follow-up rather than re-running with higher limits.
+6. Show `cost` summary if user asks about spending.
 
 ## Recency Defaults
 
