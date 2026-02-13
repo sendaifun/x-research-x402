@@ -46,6 +46,25 @@ Returns tweets from the last 7 days.
 | `$` | `$SOL` | Cashtag (for tickers) |
 | `#` | `#Solana` | Hashtag |
 
+### NOT Available on v2 Pay-Per-Use (v1.1 Legacy Only)
+
+These operators will return 400 errors. Do NOT use them:
+
+| Operator | Status | Alternative |
+|----------|--------|-------------|
+| `min_faves:N` | v1.1 Premium only | Filter client-side after fetch |
+| `min_retweets:N` | v1.1 Premium only | Filter client-side after fetch |
+| `min_replies:N` | v1.1 Premium only | Filter client-side after fetch |
+| `place:` | Not available | — |
+| `place_country:` | Not available | — |
+| `point_radius:` | Not available | — |
+| `bio:` | Not available | — |
+| `bio_name:` | Not available | — |
+| `bio_location:` | Not available | — |
+| `sample:` | Not available | — |
+
+Also avoid `&` characters in query strings — they break v2 query parsing.
+
 ### Response Format
 
 ```json

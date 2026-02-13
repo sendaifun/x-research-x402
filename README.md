@@ -26,6 +26,46 @@ cd ~/ct-alpha && bun run install.ts
 
 X API Bearer Token is prompted on first CLI run if not set. No separate setup step needed.
 
+## X API Setup (5 min)
+
+ct-alpha uses the X API v2 pay-per-use model — no monthly subscription, you only pay for tweets fetched. **Recommended starting credits: $50** (enough for ~500 searches in quick mode).
+
+### Step 1: Create a developer account
+
+1. Go to [console.x.com](https://console.x.com) and log in with your X account
+2. Accept the Developer Agreement and Policy
+3. Describe your use case (e.g. "Crypto market research and sentiment analysis")
+
+### Step 2: Create an app
+
+1. From the dashboard, click **Create App** (or "Create Project" → "Add App")
+2. Give it a name (e.g. `ct-alpha`)
+3. Your credentials will be generated automatically
+
+### Step 3: Copy your Bearer Token
+
+1. In your app settings, go to **Keys and Tokens**
+2. Find the **Bearer Token** and copy it
+3. **Save it somewhere safe** — it's only shown once (you can regenerate if lost)
+
+### Step 4: Add credits
+
+1. In the Developer Console, go to **Billing**
+2. Add a payment method
+3. Purchase **$50 in credits** ([pricing details](https://docs.x.com/x-api/fundamentals/post-cap#usage-and-billing))
+4. Credits are deducted per tweet fetched (~$0.005/tweet). Same tweet fetched twice in 24h is only charged once.
+
+### Step 5: Configure ct-alpha
+
+The installer will prompt for your token automatically. Or set it manually:
+
+```bash
+mkdir -p ~/.config/env
+echo 'export X_BEARER_TOKEN="YOUR_TOKEN_HERE"' >> ~/.config/env/global.env
+```
+
+That's it — you're ready to search CT.
+
 ## Usage
 
 ### Claude Code (auto-routed via skill)

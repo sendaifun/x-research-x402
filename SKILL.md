@@ -115,6 +115,16 @@ Execute with `--quick` mode (always the first pass):
 source ~/.config/env/global.env 2>/dev/null && bun run ~/ct-alpha/ct-search.ts search "$TOKEN alpha" --quick --extract-tickers
 ```
 
+**CRITICAL: Query string rules**
+- The query argument should contain ONLY search terms, boolean logic (`OR`, `-`, `"phrases"`), and v2 operators (`from:`, `is:retweet`, `has:links`, `lang:`, `conversation_id:`, `$cashtag`, `#hashtag`)
+- **NEVER put these v1.1 operators in the query string — they do NOT exist on v2 pay-per-use and will cause 400 errors:**
+  - `min_faves:N`, `min_retweets:N`, `min_replies:N` — use `--min-likes` CLI flag instead (filters client-side)
+  - `place:`, `place_country:`, `point_radius:` — geo operators not available
+  - `bio:`, `bio_name:`, `bio_location:` — profile operators not available
+  - `sample:` — sampling not available
+- **Do NOT manually include noise filters** (`-is:retweet`, `-"airdrop"`, etc.) in your query — the CLI auto-appends them
+- **Do NOT use `&` in query strings** — it breaks X API v2 query parsing
+
 ### 4. Extract
 Results include TweetRank scores and trust labels:
 - `[WATCHLIST]` — Author is on user's watchlist (highest trust)

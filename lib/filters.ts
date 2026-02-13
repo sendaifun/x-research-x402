@@ -21,7 +21,6 @@ const NOISE_OPERATORS = [
   '-"giveaway"',
   '-"whitelist"',
   '-"follow and RT"',
-  '-"follow & RT"',
   '-"free mint"',
   '-"dm to claim"',
 ];
