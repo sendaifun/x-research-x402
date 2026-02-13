@@ -13,18 +13,18 @@ Crypto Twitter intelligence skill for [Claude Code](https://docs.anthropic.com/e
 ## Install
 
 ```bash
-# Option 1: skills.sh
-npx skills add yashhsm/ct-alpha
+# Recommended: installs skill + symlinks to Claude Code, Cursor, Codex, etc.
+npx skills add yashhsm/ct-alpha -g
 
-# Option 2: one-liner
+# Or: one-liner (clones repo + interactive setup)
 curl -fsSL https://raw.githubusercontent.com/yashhsm/ct-alpha/main/install.sh | bash
 
-# Option 3: manual
+# Or: manual
 git clone https://github.com/yashhsm/ct-alpha.git ~/ct-alpha
 cd ~/ct-alpha && bun run install.ts
 ```
 
-Token is prompted on first run if not set. No separate setup step needed.
+X API Bearer Token is prompted on first CLI run if not set. No separate setup step needed.
 
 ## Usage
 
