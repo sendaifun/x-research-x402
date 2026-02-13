@@ -1,0 +1,6 @@
+data/cache/
+data/watchlist.json
+data/cost-tracking.json
+.env
+node_modules/
+*.log
