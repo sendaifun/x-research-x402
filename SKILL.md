@@ -81,6 +81,17 @@ Flags:
 - `--category <cat>` — Filter by category (solana-builders, defi-researchers, etc.)
 - `--since 1h|6h|24h|7d` — Time window (default: 24h)
 
+### read — Read a specific tweet/article by URL or ID (~$0.005)
+```bash
+source ~/.config/env/global.env 2>/dev/null && bun run ~/ct-alpha/ct-search.ts read <tweet_url_or_id> [flags]
+```
+
+Flags:
+- `--thread` — Also load the full conversation thread (replies)
+- `--raw` — JSON output
+
+Accepts x.com URLs, twitter.com URLs, or raw tweet IDs. Articles (long-form posts) are fetched in full. Uses full-archive search for threads (no 7-day limit).
+
 ### thread — Hydrate conversation thread
 ```bash
 source ~/.config/env/global.env 2>/dev/null && bun run ~/ct-alpha/ct-search.ts thread <tweet_id>

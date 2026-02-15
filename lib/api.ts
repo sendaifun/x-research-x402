@@ -289,32 +289,136 @@ export async function searchRecent(
   return { tweets: finalTweets, rawCount, cached: false };
 }
 
-// --- Thread ---
+// --- Single Tweet Lookup ($0.005) ---
+
+export async function getTweet(
+  tweetId: string
+): Promise<{ tweet: Tweet | null; cached: boolean }> {
+  const ck = cache.cacheKey("tweet", { tweetId });
+  const cached = cache.get<{ tweet: Tweet }>(ck);
+  if (cached) return { ...cached, cached: true };
+
+  const url = `${BASE_URL}/tweets/${tweetId}?tweet.fields=${TWEET_FIELDS}&user.fields=${USER_FIELDS}&expansions=${EXPANSIONS}`;
+  const res = await apiGet(url);
+  const tweets = parseTweets({ data: res.data ? [res.data] : res.data, includes: res.includes });
+  const tweet = tweets[0] || null;
+
+  if (tweet) {
+    recordUsage(1, `tweet:${tweetId}`);
+    cache.set(ck, { tweet }, cache.TTL.THREAD);
+  }
+
+  return { tweet, cached: false };
+}
+
+// --- Batch Tweet Lookup (up to 100 IDs, $0.005/tweet) ---
+
+export async function getBatchTweets(
+  tweetIds: string[]
+): Promise<{ tweets: Tweet[]; cached: boolean }> {
+  if (tweetIds.length === 0) return { tweets: [], cached: true };
+  if (tweetIds.length > 100) tweetIds = tweetIds.slice(0, 100);
+
+  const ck = cache.cacheKey("batch", { ids: tweetIds.sort().join(",") });
+  const cached = cache.get<{ tweets: Tweet[] }>(ck);
+  if (cached) return { ...cached, cached: true };
+
+  const url = `${BASE_URL}/tweets?ids=${tweetIds.join(",")}&tweet.fields=${TWEET_FIELDS}&user.fields=${USER_FIELDS}&expansions=${EXPANSIONS}`;
+  const res = await apiGet(url);
+  const tweets = parseTweets(res);
+
+  recordUsage(tweets.length, `batch:${tweetIds.length}ids`);
+  cache.set(ck, { tweets }, cache.TTL.THREAD);
+
+  return { tweets, cached: false };
+}
+
+// --- Full-Archive Search (no 7-day limit, $0.005/tweet) ---
+
+export async function searchAll(
+  query: string,
+  opts: SearchOptions = {}
+): Promise<{ tweets: Tweet[]; rawCount: number; cached: boolean }> {
+  const totalLimit = opts.maxResults || 100;
+  const maxPages = Math.min(opts.maxPages || 1, Math.ceil(totalLimit / 10));
+  const maxResults = Math.max(10, Math.min(totalLimit, 100));
+  const sort = opts.sort || "recency";
+
+  const ck = cache.cacheKey("search_all", { query, sort, maxPages, maxResults });
+  const cached = cache.get<{ tweets: Tweet[]; rawCount: number }>(ck);
+  if (cached) return { ...cached, cached: true };
+
+  const allTweets: Tweet[] = [];
+  let rawCount = 0;
+  let nextToken: string | undefined;
+
+  for (let page = 0; page < maxPages; page++) {
+    const params = new URLSearchParams({
+      query,
+      max_results: String(maxResults),
+      "tweet.fields": TWEET_FIELDS,
+      "user.fields": USER_FIELDS,
+      expansions: EXPANSIONS,
+      sort_order: sort,
+    });
+
+    if (opts.startTime) params.set("start_time", opts.startTime);
+    if (opts.endTime) params.set("end_time", opts.endTime);
+    if (nextToken) params.set("next_token", nextToken);
+
+    const url = `${BASE_URL}/tweets/search/all?${params}`;
+    const response = await apiGet(url);
+    const tweets = parseTweets(response);
+    rawCount += response.meta?.result_count || 0;
+    allTweets.push(...tweets);
+
+    if (allTweets.length >= totalLimit) break;
+    nextToken = response.meta?.next_token;
+    if (!nextToken) break;
+    if (page < maxPages - 1) await sleep(RATE_DELAY_MS);
+  }
+
+  if (allTweets.length > totalLimit) allTweets.length = totalLimit;
+
+  const deduped = dedupe(allTweets);
+  recordUsage(rawCount, query);
+  cache.set(ck, { tweets: deduped, rawCount }, cache.TTL.THREAD);
+
+  return { tweets: deduped, rawCount, cached: false };
+}
+
+// --- Thread (uses full-archive search — no 7-day limit) ---
 
 export async function getThread(
   tweetId: string
 ): Promise<{ tweets: Tweet[]; rootTweet: Tweet | null; partial: boolean; cached: boolean }> {
-  // First get the tweet to find conversation_id
   const ck = cache.cacheKey("thread", { tweetId });
   const cached = cache.get<{ tweets: Tweet[]; rootTweet: Tweet | null; partial: boolean }>(ck);
   if (cached) return { ...cached, cached: true };
 
-  // Fetch the root tweet
-  const tweetUrl = `${BASE_URL}/tweets/${tweetId}?tweet.fields=${TWEET_FIELDS}&user.fields=${USER_FIELDS}&expansions=${EXPANSIONS}`;
-  const tweetRes = await apiGet(tweetUrl);
-  const rootTweets = parseTweets({ data: tweetRes.data ? [tweetRes.data] : tweetRes.data, includes: tweetRes.includes });
-  const rootTweet = rootTweets[0] || null;
+  // Fetch the root tweet ($0.005)
+  const rootResult = await getTweet(tweetId);
+  const rootTweet = rootResult.tweet;
 
   if (!rootTweet) {
     return { tweets: [], rootTweet: null, partial: false, cached: false };
   }
 
-  // Search for conversation
+  // Search full archive for conversation thread (no 7-day limit)
   const convQuery = `conversation_id:${rootTweet.conversation_id}`;
-  const result = await searchRecent(convQuery, { maxPages: 2, sort: "recency", since: "7d" });
+  let result: { tweets: Tweet[]; rawCount: number; cached: boolean };
+  try {
+    result = await searchAll(convQuery, { maxPages: 2, sort: "recency", maxResults: 100 });
+  } catch (err: any) {
+    // Fall back to recent search if full-archive isn't available on this tier
+    if (err.message.includes("403") || err.message.includes("not available")) {
+      result = await searchRecent(convQuery, { maxPages: 2, sort: "recency", since: "7d" });
+    } else {
+      throw err;
+    }
+  }
 
-  // Check if thread is partial (conversation might extend beyond 7-day window)
-  const partial = result.tweets.length >= 190; // Near pagination limit suggests more exist
+  const partial = result.tweets.length >= 190;
 
   const allTweets = [rootTweet, ...result.tweets.filter(t => t.id !== rootTweet.id)];
   allTweets.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());

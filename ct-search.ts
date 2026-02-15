@@ -13,12 +13,12 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, openSync, readSync, closeSync } from "fs";
 import { join } from "path";
-import { searchRecent, dedupe, getThread, type Tweet } from "./lib/api";
+import { searchRecent, dedupe, getThread, getTweet, getBatchTweets, type Tweet } from "./lib/api";
 import * as cache from "./lib/cache";
 import { appendNoiseFilters, applyEngagementFilter } from "./lib/filters";
 import { rankTweets, detectRaids, type RankedTweet } from "./lib/tweetrank";
 import { extractCryptoUrls, extractContractAddresses, aggregateMentions } from "./lib/extract";
-import { formatSearchResults, formatTrending, formatContractAddresses, formatCryptoUrls, formatWatchlist, formatThread } from "./lib/format";
+import { formatSearchResults, formatTrending, formatContractAddresses, formatCryptoUrls, formatWatchlist, formatThread, formatRead } from "./lib/format";
 import { getSummary, reset as resetCost } from "./lib/cost";
 
 // --- Arg Parsing ---
@@ -381,6 +381,67 @@ async function cmdThread(positional: string[]) {
   console.log(formatThread(ranked, result.partial, result.cached));
 }
 
+// --- URL / ID Parsing ---
+
+function parseTweetInput(input: string): string {
+  // Accept: tweet ID, x.com URL, twitter.com URL
+  // https://x.com/user/status/123456789?s=20 → 123456789
+  // https://twitter.com/user/status/123456789 → 123456789
+  const urlMatch = input.match(/(?:x\.com|twitter\.com)\/\w+\/status\/(\d+)/);
+  if (urlMatch) return urlMatch[1];
+
+  // Raw tweet ID
+  if (/^\d+$/.test(input.trim())) return input.trim();
+
+  throw new Error(`Cannot parse tweet ID from: ${input}. Provide a tweet URL or numeric ID.`);
+}
+
+async function cmdRead(positional: string[], flags: Record<string, string | boolean>) {
+  const input = positional[0];
+  if (!input) {
+    console.error("Usage: ct-search read <tweet_url_or_id> [--thread] [--raw]");
+    process.exit(1);
+  }
+
+  const tweetId = parseTweetInput(input);
+  const wantThread = !!flags.thread;
+  const rawOutput = !!flags.raw;
+
+  if (wantThread) {
+    // Full thread: root tweet + conversation replies
+    const result = await getThread(tweetId);
+    const wl = watchlistSet();
+    const ranked = rankTweets(result.tweets, wl);
+
+    if (rawOutput) {
+      console.log(JSON.stringify(ranked, null, 2));
+    } else {
+      console.log(formatThread(ranked, result.partial, result.cached));
+    }
+  } else {
+    // Single tweet read ($0.005)
+    const result = await getTweet(tweetId);
+    if (!result.tweet) {
+      console.error(`Tweet ${tweetId} not found or deleted.`);
+      process.exit(1);
+    }
+
+    const wl = watchlistSet();
+    const [ranked] = rankTweets([result.tweet], wl);
+
+    if (rawOutput) {
+      console.log(JSON.stringify(ranked, null, 2));
+    } else {
+      console.log(formatRead(ranked, result.cached));
+
+      // Hint if there are replies
+      if (result.tweet.metrics.replies > 0) {
+        console.log(`\n💡 This tweet has ${result.tweet.metrics.replies} replies. Use \`--thread\` to load the full conversation.`);
+      }
+    }
+  }
+}
+
 async function cmdCost(flags: Record<string, string | boolean>) {
   if (flags.reset) {
     resetCost();
@@ -422,6 +483,10 @@ Commands:
     --since <duration>       Time window (default: 24h)
     --summary                Narrative summary mode
 
+  read <url_or_id> [flags]   Read a single tweet/article (~$0.005)
+    --thread                 Load full conversation thread too
+    --raw                    Output raw JSON
+
   thread <tweet_id>          Hydrate a full conversation thread
 
   cost [--reset]             Show API credit usage (--reset clears all)
@@ -429,7 +494,7 @@ Commands:
 Environment:
   X_BEARER_TOKEN             Required. You'll be prompted on first run if not set.
 
-Cost: ~$0.10 per quick search (20 tweets × $0.005). Use --limit to control.
+Cost: ~$0.005 per tweet read, ~$0.10 per quick search (20 tweets). Use --limit to control.
 `);
 }
 
@@ -442,7 +507,7 @@ async function main() {
   const { command, positional, flags } = parseArgs(process.argv);
 
   // Commands that need an API token
-  const apiCommands = new Set(["search", "trending", "watchlist", "thread"]);
+  const apiCommands = new Set(["search", "trending", "watchlist", "thread", "read"]);
   if (apiCommands.has(command)) {
     ensureToken();
   }
@@ -460,6 +525,9 @@ async function main() {
         break;
       case "thread":
         await cmdThread(positional);
+        break;
+      case "read":
+        await cmdRead(positional, flags);
         break;
       case "cost":
         await cmdCost(flags);

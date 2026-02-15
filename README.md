@@ -77,6 +77,12 @@ That's it — you're ready to search CT.
 
 ### CLI
 ```bash
+# Read a tweet/article by URL ($0.005)
+bun run ct-search.ts read https://x.com/user/status/123
+
+# Read with full thread + replies
+bun run ct-search.ts read https://x.com/user/status/123 --thread
+
 # Search
 bun run ct-search.ts search "$SOL alpha" --quick --extract-tickers
 
@@ -85,9 +91,6 @@ bun run ct-search.ts trending --window 6h --solana-only
 
 # Monitor watchlist
 bun run ct-search.ts watchlist --since 24h
-
-# Thread hydration
-bun run ct-search.ts thread <tweet_id>
 
 # API spend
 bun run ct-search.ts cost
@@ -99,9 +102,13 @@ X API charges $0.005/tweet via xAI pay-per-use.
 
 | Operation | Tweets | Cost |
 |---|---|---|
+| Read tweet/article | 1 | $0.005 |
+| Read + thread | 1 + replies | ~$0.005-0.10 |
 | Quick search (default) | 20 | ~$0.10 |
 | Full search (`--full`) | up to 100 | ~$0.50 |
 | Trending scan | 2-3 queries x 30 | ~$0.30-0.45 |
+
+Same tweet re-read within 24h (UTC) is free (X API deduplication).
 
 Quick mode is always default. Cost displayed after every operation.
 

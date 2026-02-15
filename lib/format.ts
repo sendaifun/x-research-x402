@@ -229,12 +229,70 @@ export function formatThread(
 ): string {
   const header = [
     `## Thread (${tweets.length} tweets)`,
-    partial ? "⚠️ **PARTIAL THREAD (recent window only)** — older replies may be missing" : "",
+    partial ? "⚠️ **PARTIAL THREAD** — older replies may be missing" : "",
     cached ? "⚡ [CACHED]" : "",
     "",
   ].filter(Boolean);
 
   const tweetLines = tweets.map((t, i) => formatTweet(t, i));
   return [...header, ...tweetLines].join("\n\n");
+}
+
+// --- Format read (single tweet / article) ---
+
+export function formatRead(
+  tweet: RankedTweet,
+  cached: boolean
+): string {
+  const articleTag = tweet.is_article ? " 📝 ARTICLE" : "";
+  const label = `[${tweet.sourceLabel}]`;
+  const cred = `Cred:${tweet.authorCred.toFixed(1)}`;
+
+  const engagement = [
+    `♥ ${tweet.metrics.likes}`,
+    `🔁 ${tweet.metrics.retweets}`,
+    `💬 ${tweet.metrics.replies}`,
+    `🔖 ${tweet.metrics.bookmarks}`,
+    `👁 ${tweet.metrics.impressions.toLocaleString()} views`,
+  ].join("  ·  ");
+
+  const costTag = cached ? "⚡ [CACHED] 0 credits" : "📊 1 tweet read · ~$0.005";
+
+  const lines = [
+    `## CT Alpha Read${articleTag}`,
+    "",
+    `**@${tweet.username}** (${tweet.author.name}) · ${tweet.author.followers_count.toLocaleString()} followers · ${label} · ${cred}`,
+    `${timeAgo(tweet.created_at)} · ${tweet.tweet_url}`,
+    "",
+    costTag,
+    "",
+    "---",
+    "",
+    tweet.text, // Full text, no truncation
+    "",
+    "---",
+    "",
+    engagement,
+  ];
+
+  const risk = riskBullet(tweet);
+  if (risk) lines.push("", risk);
+
+  if (tweet.urls.length > 0) {
+    lines.push("", "**Links:**");
+    for (const u of tweet.urls) {
+      lines.push(`- ${u}`);
+    }
+  }
+
+  if (tweet.mentions.length > 0) {
+    lines.push("", `**Mentions:** ${tweet.mentions.map(m => `@${m}`).join(", ")}`);
+  }
+
+  if (tweet.hashtags.length > 0) {
+    lines.push("", `**Tags:** ${tweet.hashtags.map(h => `#${h}`).join(", ")}`);
+  }
+
+  return lines.join("\n");
 }
 

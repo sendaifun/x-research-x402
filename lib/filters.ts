@@ -54,7 +54,9 @@ export function buildTimeRange(since: string): { start_time: string; end_time?: 
   const val = parseInt(match[1]);
   const unit = match[2];
   const ms = unit === "h" ? val * 60 * 60 * 1000 : val * 24 * 60 * 60 * 1000;
-  const start = new Date(now.getTime() - ms);
+  // Add 15-minute buffer to avoid X API edge-case rejections near the 7-day boundary
+  const BUFFER_MS = 15 * 60 * 1000;
+  const start = new Date(now.getTime() - ms + BUFFER_MS);
 
   return {
     start_time: start.toISOString(),
