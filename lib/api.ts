@@ -215,9 +215,10 @@ export async function searchRecent(
       const val = parseInt(match[1]);
       const unit = match[2];
       const ms = unit === "h" ? val * 3600000 : val * 86400000;
-      // Bucket to the hour so cache keys are stable within the same hour
       const raw = Date.now() - ms;
-      startTime = new Date(raw - (raw % 3600000)).toISOString();
+      // Round UP to next hour for cache stability + avoids X API 7-day boundary rejections
+      const HOUR_MS = 3600000;
+      startTime = new Date(raw - (raw % HOUR_MS) + HOUR_MS).toISOString();
     }
   }
 
