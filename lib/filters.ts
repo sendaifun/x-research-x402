@@ -27,12 +27,6 @@ const NOISE_OPERATORS = [
 
 const QUICK_EXTRA = ["-is:reply"];
 
-export function buildNoiseFilter(quick: boolean = false): string {
-  const ops = [...NOISE_OPERATORS];
-  if (quick) ops.push(...QUICK_EXTRA);
-  return ops.join(" ");
-}
-
 export function applyEngagementFilter<T extends { metrics: TweetMetrics }>(
   tweets: T[],
   filter: EngagementFilter
@@ -70,9 +64,9 @@ export function hasOperator(query: string, op: string): boolean {
 
 // Append noise filters only if not already present
 export function appendNoiseFilters(query: string, quick: boolean = false): string {
-  const noise = buildNoiseFilter(quick);
-  const parts = noise.split(" ");
-  const toAdd = parts.filter(p => !hasOperator(query, p.replace(/^-/, "").replace(/"/g, "")));
+  const ops = [...NOISE_OPERATORS];
+  if (quick) ops.push(...QUICK_EXTRA);
+  const toAdd = ops.filter(op => !hasOperator(query, op.replace(/^-/, "").replace(/"/g, "")));
   if (toAdd.length === 0) return query;
   return `${query} ${toAdd.join(" ")}`;
 }
