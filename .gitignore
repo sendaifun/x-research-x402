@@ -4,3 +4,4 @@ data/cost-tracking.json
 .env
 node_modules/
 *.log
+data/runtime/

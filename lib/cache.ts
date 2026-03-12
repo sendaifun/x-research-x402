@@ -14,12 +14,14 @@ export interface CacheEntry<T = any> {
 }
 
 export const TTL = {
+  READ: 24 * 60 * 60 * 1000,         // 24 hours
   QUICK: 60 * 60 * 1000,        // 1 hour
   FULL: 15 * 60 * 1000,         // 15 minutes
   WATCHLIST: 4 * 60 * 60 * 1000, // 4 hours
   PROFILE: 24 * 60 * 60 * 1000,  // 24 hours
-  THREAD: 2 * 60 * 60 * 1000,    // 2 hours
-  TRENDING: 60 * 60 * 1000,      // 1 hour (baseline comparisons)
+  THREAD: 6 * 60 * 60 * 1000,    // 6 hours
+  TRENDING: 15 * 60 * 1000,      // 15 minutes
+  ACCOUNTS_FEED: 15 * 60 * 1000, // 15 minutes
 } as const;
 
 function ensureCacheDir(): void {
