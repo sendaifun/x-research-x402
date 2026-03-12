@@ -6,6 +6,7 @@ import { paymentMiddleware, x402ResourceServer } from "@x402/hono";
 import { paymentIdentifierResourceServerExtension, extractAndValidatePaymentIdentifier } from "@x402/extensions/payment-identifier";
 import { ExactSvmScheme } from "@x402/svm/exact/server";
 import { handleSiwxAuth, requireSession, type ApiEnv } from "./lib/http-auth";
+import { buildAgentDocsResponse, buildServiceStatus } from "./lib/http-public-docs";
 import {
   HttpValidationError,
   canServeAccountsFeedWithoutX,
@@ -562,15 +563,9 @@ app.onError((error, c) => {
   return toErrorResponse(c, error);
 });
 
-app.get("/", (c) =>
-  c.json({
-    service: "ct-alpha",
-    network,
-    modes: ["standard", "metered"],
-    standard_prefix: "/x402",
-    metered_prefix: "/metered",
-  })
-);
+app.get("/", (c) => c.json(buildServiceStatus(network)));
+
+app.get("/docs.md", () => buildAgentDocsResponse(network));
 
 app.post("/metered/auth/siwx", withErrors((c) => handleSiwxAuth(c, network)));
 app.get("/metered/credits/balance", requireSession, withErrors(handleBalance));
