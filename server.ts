@@ -272,13 +272,13 @@ const standardFreeCacheMiddleware: MiddlewareHandler<ApiEnv> = async (c, next) =
   try {
     switch (c.req.path) {
       case "/x402/read":
-        if (canServeReadWithoutX(getTweetId(c), getFresh(c))) {
+        if (await canServeReadWithoutX(getTweetId(c), getFresh(c))) {
           return await handleStandardRead(c);
         }
         break;
       case "/x402/search/20":
         if (
-          canServeSearchWithoutX({
+          await canServeSearchWithoutX({
             q: c.req.query("q"),
             limit: 20,
             since: c.req.query("since"),
@@ -293,7 +293,7 @@ const standardFreeCacheMiddleware: MiddlewareHandler<ApiEnv> = async (c, next) =
         break;
       case "/x402/search/100":
         if (
-          canServeSearchWithoutX({
+          await canServeSearchWithoutX({
             q: c.req.query("q"),
             limit: 100,
             since: c.req.query("since"),
@@ -308,7 +308,7 @@ const standardFreeCacheMiddleware: MiddlewareHandler<ApiEnv> = async (c, next) =
         break;
       case "/x402/accounts-feed/20":
         if (
-          canServeAccountsFeedWithoutX({
+          await canServeAccountsFeedWithoutX({
             accounts: c.req.query("accounts") || "",
             limit: 20,
             since: c.req.query("since"),
@@ -320,7 +320,7 @@ const standardFreeCacheMiddleware: MiddlewareHandler<ApiEnv> = async (c, next) =
         break;
       case "/x402/accounts-feed/100":
         if (
-          canServeAccountsFeedWithoutX({
+          await canServeAccountsFeedWithoutX({
             accounts: c.req.query("accounts") || "",
             limit: 100,
             since: c.req.query("since"),
@@ -331,13 +331,13 @@ const standardFreeCacheMiddleware: MiddlewareHandler<ApiEnv> = async (c, next) =
         }
         break;
       case "/x402/thread/100":
-        if (canServeThreadWithoutX(getTweetId(c), getFresh(c))) {
+        if (await canServeThreadWithoutX(getTweetId(c), getFresh(c))) {
           return await handleStandardThread(c);
         }
         break;
       case "/x402/trending/solana":
         if (
-          canServeTrendingWithoutX("solana", {
+          await canServeTrendingWithoutX("solana", {
             window: c.req.query("window"),
             top: c.req.query("top"),
             fresh: c.req.query("fresh"),
@@ -348,7 +348,7 @@ const standardFreeCacheMiddleware: MiddlewareHandler<ApiEnv> = async (c, next) =
         break;
       case "/x402/trending/general":
         if (
-          canServeTrendingWithoutX("general", {
+          await canServeTrendingWithoutX("general", {
             window: c.req.query("window"),
             top: c.req.query("top"),
             fresh: c.req.query("fresh"),
@@ -376,14 +376,14 @@ async function runMetered<T extends { data: unknown; meta: object; usage: { post
 
   if (warm) {
     const result = await fetcher();
-    const balance = getWalletBalance(wallet);
+    const balance = await getWalletBalance(wallet);
     return c.json({
       data: (result as any).data,
       meta: buildMeteredMeta(result.meta, 0, balance),
     });
   }
 
-  const reservation = reserveWalletBalance(wallet, reserveMicrousd, reason);
+  const reservation = await reserveWalletBalance(wallet, reserveMicrousd, reason);
   if (!reservation.ok) {
     return insufficientFundsResponse(c, wallet, reservation.balanceMicrousd, reserveMicrousd);
   }
@@ -391,7 +391,7 @@ async function runMetered<T extends { data: unknown; meta: object; usage: { post
   try {
     const result = await fetcher();
     const chargedMicrousd = result.usage.postsRead * POSTS_READ_MICRO_USD;
-    const settled = settleReservation(reservation.reservationId, chargedMicrousd);
+    const settled = await settleReservation(reservation.reservationId, chargedMicrousd);
     if (!settled) {
       throw new Error("Failed to settle metered reservation.");
     }
@@ -401,7 +401,7 @@ async function runMetered<T extends { data: unknown; meta: object; usage: { post
       meta: buildMeteredMeta(result.meta, settled.chargedMicrousd, settled.balanceMicrousd),
     });
   } catch (error) {
-    releaseReservation(reservation.reservationId);
+    await releaseReservation(reservation.reservationId);
     throw error;
   }
 }
@@ -409,8 +409,12 @@ async function runMetered<T extends { data: unknown; meta: object; usage: { post
 async function handleMeteredRead(c: Context<ApiEnv>): Promise<Response> {
   const tweetId = getTweetId(c);
   const fresh = getFresh(c);
-  return runMetered(c, "read", reserveForRead(), canServeReadWithoutX(tweetId, fresh), () =>
-    fetchRead(tweetId, fresh)
+  return runMetered(
+    c,
+    "read",
+    reserveForRead(),
+    await canServeReadWithoutX(tweetId, fresh),
+    () => fetchRead(tweetId, fresh)
   );
 }
 
@@ -429,7 +433,7 @@ async function handleMeteredSearch(c: Context<ApiEnv>): Promise<Response> {
     c,
     "search",
     reserveForSearch(Number.isFinite(limit) && limit > 0 ? Math.min(limit, 100) : 20),
-    canServeSearchWithoutX(request),
+    await canServeSearchWithoutX(request),
     () => fetchSearch(request)
   );
 }
@@ -446,7 +450,7 @@ async function handleMeteredAccountsFeed(c: Context<ApiEnv>): Promise<Response> 
     c,
     "accounts-feed",
     reserveForSearch(Number.isFinite(limit) && limit > 0 ? Math.min(limit, 100) : 20),
-    canServeAccountsFeedWithoutX(request),
+    await canServeAccountsFeedWithoutX(request),
     () => fetchAccountsFeed(request)
   );
 }
@@ -458,7 +462,7 @@ async function handleMeteredThread(c: Context<ApiEnv>): Promise<Response> {
     c,
     "thread",
     reserveForThread(),
-    canServeThreadWithoutX(tweetId, fresh),
+    await canServeThreadWithoutX(tweetId, fresh),
     () => fetchThread(tweetId, fresh)
   );
 }
@@ -478,14 +482,14 @@ async function handleMeteredTrending(c: Context<ApiEnv>): Promise<Response> {
     c,
     `trending:${kind}`,
     reserveForTrending(kind),
-    canServeTrendingWithoutX(kind, request),
+    await canServeTrendingWithoutX(kind, request),
     () => fetchTrending(kind, request)
   );
 }
 
 async function handleBalance(c: Context<ApiEnv>): Promise<Response> {
   const wallet = c.get("wallet");
-  const balanceMicrousd = getWalletBalance(wallet);
+  const balanceMicrousd = await getWalletBalance(wallet);
 
   return c.json({
     data: {
@@ -507,9 +511,9 @@ async function handleTopup(c: Context<ApiEnv>): Promise<Response> {
   }
 
   const paymentId = extractPaymentIdFromRequest(c);
-  const existing = getTopup(paymentId);
+  const existing = await getTopup(paymentId);
   if (existing) {
-    const balanceMicrousd = getWalletBalance(existing.wallet);
+    const balanceMicrousd = await getWalletBalance(existing.wallet);
     return c.json({
       data: {
         wallet: existing.wallet,
@@ -525,7 +529,7 @@ async function handleTopup(c: Context<ApiEnv>): Promise<Response> {
   }
 
   const amountMicrousd = usdToMicroUsd(amountUsd);
-  const recorded = recordTopup(paymentId, wallet, amountMicrousd, c.req.path);
+  const recorded = await recordTopup(paymentId, wallet, amountMicrousd, c.req.path);
 
   return c.json({
     data: {

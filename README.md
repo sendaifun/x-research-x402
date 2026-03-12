@@ -121,9 +121,10 @@ lib/
   tweetrank.ts        Credibility scoring + raid detection
   extract.ts          Multi-signal extraction (tickers, CAs, URLs, name-phrases)
   filters.ts          Crypto noise filters + engagement thresholds
-  cache.ts            File-based MD5 caching with TTL tiers
-  cost.ts             Credit tracking
+  cache.ts            Redis-backed cache with local-file fallback
+  cost.ts             Redis-backed usage tracking with local-file fallback
   format.ts           Structured output with trust labels
+  runtime-store.ts    Redis-backed sessions, balances, reservations, top-ups
 data/
   watchlist.default.json   Default CT accounts (shipped)
   known-tokens.json        Token name-to-ticker mappings
@@ -156,6 +157,8 @@ cp .env.example .env
 - `X402_FACILITATOR_URL`
 - `X402_PAY_TO`
 - `X402_NETWORK` (`mainnet` by default, or `devnet`/`testnet`)
+- `REDIS_URL` (recommended for any hosted deployment)
+- `REDIS_PREFIX` (optional, defaults to `ct-alpha`)
 - `PORT` (optional, defaults to `3000`)
 
 ### Run the API
@@ -164,6 +167,29 @@ cp .env.example .env
 bun install
 bun run dev:api
 ```
+
+### Docker + Redis
+
+Local containerized stack:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+This starts:
+
+- the Bun API on `http://localhost:3000`
+- Redis on `localhost:6379`
+
+The compose stack injects `REDIS_URL=redis://redis:6379` for the API container.
+
+For production:
+
+- run the same image behind HTTPS
+- inject secrets from your secret manager instead of a checked-in `.env`
+- point `REDIS_URL` at your managed Redis instance
+- keep `X_BEARER_TOKEN`, `X402_FACILITATOR_URL`, and `X402_PAY_TO` in the secret manager
 
 ### Standard x402 routes
 

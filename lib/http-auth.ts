@@ -96,10 +96,10 @@ export async function handleSiwxAuth(
     );
   }
 
-  markSiwxNonceUsed(payload.nonce);
+  await markSiwxNonceUsed(payload.nonce);
   const wallet = verification.address || payload.address;
-  const session = createSession(wallet);
-  const balanceMicrousd = getWalletBalance(wallet);
+  const session = await createSession(wallet);
+  const balanceMicrousd = await getWalletBalance(wallet);
 
   return c.json({
     data: {
@@ -124,7 +124,7 @@ export const requireSession: MiddlewareHandler<ApiEnv> = async (c, next) => {
     );
   }
 
-  const session = getSession(token);
+  const session = await getSession(token);
   if (!session) {
     return c.json({ error: "Session is missing or expired." }, { status: 401 });
   }

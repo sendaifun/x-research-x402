@@ -444,14 +444,14 @@ async function cmdRead(positional: string[], flags: Record<string, string | bool
 
 async function cmdCost(flags: Record<string, string | boolean>) {
   if (flags.reset) {
-    resetCost();
-    cache.clear();
+    await resetCost();
+    await cache.clear();
     console.log("Cost tracking and cache cleared.");
     return;
   }
 
-  console.log(getSummary());
-  const cacheStats = cache.stats();
+  console.log(await getSummary());
+  const cacheStats = await cache.stats();
   console.log(`\n📦 Cache: ${cacheStats.entries} entries (${cacheStats.totalSizeKb}KB)`);
 }
 
@@ -502,7 +502,7 @@ Cost: ~$0.005 per tweet read, ~$0.10 per quick search (20 tweets). Use --limit t
 
 async function main() {
   // Prune cache on startup
-  cache.prune();
+  await cache.prune();
 
   const { command, positional, flags } = parseArgs(process.argv);
 

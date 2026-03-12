@@ -283,7 +283,7 @@ export async function searchRecent(
   // Cache check — key on `since` string (not computed startTime) for stable cache hits
   const ck = searchRecentCacheKey(query, opts);
   if (!controls?.forceFresh) {
-    const cached = cache.get<{ tweets: Tweet[]; rawCount: number }>(ck);
+    const cached = await cache.get<{ tweets: Tweet[]; rawCount: number }>(ck);
     if (cached) {
       return { ...cached, cached: true };
     }
@@ -341,13 +341,13 @@ export async function searchRecent(
 
   // Record cost
   if (shouldRecordUsage(controls)) {
-    recordUsage(rawCount, query);
+    await recordUsage(rawCount, query);
   }
 
   // Cache result
   const ttl =
     controls?.cacheTtlMs ?? (totalLimit <= 20 ? cache.TTL.QUICK : cache.TTL.FULL);
-  cache.set(ck, { tweets: finalTweets, rawCount }, ttl);
+  await cache.set(ck, { tweets: finalTweets, rawCount }, ttl);
 
   return { tweets: finalTweets, rawCount, cached: false };
 }
@@ -360,7 +360,7 @@ export async function getTweet(
 ): Promise<{ tweet: Tweet | null; cached: boolean }> {
   const ck = tweetCacheKey(tweetId);
   if (!controls?.forceFresh) {
-    const cached = cache.get<{ tweet: Tweet }>(ck);
+    const cached = await cache.get<{ tweet: Tweet }>(ck);
     if (cached) return { ...cached, cached: true };
   }
 
@@ -371,9 +371,9 @@ export async function getTweet(
 
   if (tweet) {
     if (shouldRecordUsage(controls)) {
-      recordUsage(1, `tweet:${tweetId}`);
+      await recordUsage(1, `tweet:${tweetId}`);
     }
-    cache.set(ck, { tweet }, controls?.cacheTtlMs ?? cache.TTL.READ);
+    await cache.set(ck, { tweet }, controls?.cacheTtlMs ?? cache.TTL.READ);
   }
 
   return { tweet, cached: false };
@@ -390,7 +390,7 @@ export async function getBatchTweets(
 
   const ck = batchTweetsCacheKey(tweetIds);
   if (!controls?.forceFresh) {
-    const cached = cache.get<{ tweets: Tweet[] }>(ck);
+    const cached = await cache.get<{ tweets: Tweet[] }>(ck);
     if (cached) return { ...cached, cached: true };
   }
 
@@ -399,9 +399,9 @@ export async function getBatchTweets(
   const tweets = parseTweets(res);
 
   if (shouldRecordUsage(controls)) {
-    recordUsage(tweets.length, `batch:${tweetIds.length}ids`);
+    await recordUsage(tweets.length, `batch:${tweetIds.length}ids`);
   }
-  cache.set(ck, { tweets }, controls?.cacheTtlMs ?? cache.TTL.THREAD);
+  await cache.set(ck, { tweets }, controls?.cacheTtlMs ?? cache.TTL.THREAD);
 
   return { tweets, cached: false };
 }
@@ -420,7 +420,7 @@ export async function searchAll(
 
   const ck = searchAllCacheKey(query, opts);
   if (!controls?.forceFresh) {
-    const cached = cache.get<{ tweets: Tweet[]; rawCount: number }>(ck);
+    const cached = await cache.get<{ tweets: Tweet[]; rawCount: number }>(ck);
     if (cached) return { ...cached, cached: true };
   }
 
@@ -458,9 +458,9 @@ export async function searchAll(
 
   const deduped = dedupe(allTweets);
   if (shouldRecordUsage(controls)) {
-    recordUsage(rawCount, query);
+    await recordUsage(rawCount, query);
   }
-  cache.set(ck, { tweets: deduped, rawCount }, controls?.cacheTtlMs ?? cache.TTL.THREAD);
+  await cache.set(ck, { tweets: deduped, rawCount }, controls?.cacheTtlMs ?? cache.TTL.THREAD);
 
   return { tweets: deduped, rawCount, cached: false };
 }
@@ -473,7 +473,7 @@ export async function getThread(
 ): Promise<{ tweets: Tweet[]; rootTweet: Tweet | null; partial: boolean; cached: boolean }> {
   const ck = threadCacheKey(tweetId);
   if (!controls?.forceFresh) {
-    const cached = cache.get<{ tweets: Tweet[]; rootTweet: Tweet | null; partial: boolean }>(ck);
+    const cached = await cache.get<{ tweets: Tweet[]; rootTweet: Tweet | null; partial: boolean }>(ck);
     if (cached) return { ...cached, cached: true };
   }
 
@@ -512,7 +512,7 @@ export async function getThread(
   const allTweets = [rootTweet, ...result.tweets.filter(t => t.id !== rootTweet.id)];
   allTweets.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-  cache.set(
+  await cache.set(
     ck,
     { tweets: allTweets, rootTweet, partial },
     controls?.cacheTtlMs ?? cache.TTL.THREAD
@@ -528,7 +528,7 @@ export async function getProfile(
 ): Promise<{ user: Tweet["author"]; recentTweets: Tweet[]; cached: boolean }> {
   const ck = profileCacheKey(username);
   if (!controls?.forceFresh) {
-    const cached = cache.get<{ user: Tweet["author"]; recentTweets: Tweet[] }>(ck);
+    const cached = await cache.get<{ user: Tweet["author"]; recentTweets: Tweet[] }>(ck);
     if (cached) return { ...cached, cached: true };
   }
 
@@ -558,9 +558,9 @@ export async function getProfile(
   const recentTweets = parseTweets(tweetsRes);
 
   if (shouldRecordUsage(controls)) {
-    recordUsage(recentTweets.length + 1);
+    await recordUsage(recentTweets.length + 1);
   }
-  cache.set(ck, { user, recentTweets }, controls?.cacheTtlMs ?? cache.TTL.PROFILE);
+  await cache.set(ck, { user, recentTweets }, controls?.cacheTtlMs ?? cache.TTL.PROFILE);
   return { user, recentTweets, cached: false };
 }
 

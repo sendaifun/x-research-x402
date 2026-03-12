@@ -2,6 +2,7 @@ data/cache/
 data/watchlist.json
 data/cost-tracking.json
 .env
+.env.local
 node_modules/
 *.log
 data/runtime/

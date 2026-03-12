@@ -296,7 +296,7 @@ function buildTrendingPlan(kind: StandardTrendingKind, request: TrendingRequest)
   };
 }
 
-export function canServeReadWithoutX(tweetIdInput: string, fresh: boolean): boolean {
+export async function canServeReadWithoutX(tweetIdInput: string, fresh: boolean): Promise<boolean> {
   if (fresh) {
     return false;
   }
@@ -304,7 +304,7 @@ export function canServeReadWithoutX(tweetIdInput: string, fresh: boolean): bool
   return cache.has(tweetCacheKey(parseTweetInput(tweetIdInput)));
 }
 
-export function canServeSearchWithoutX(request: SearchRequest): boolean {
+export async function canServeSearchWithoutX(request: SearchRequest): Promise<boolean> {
   const plan = buildSearchPlan(request);
   if (plan.fresh) {
     return false;
@@ -320,7 +320,9 @@ export function canServeSearchWithoutX(request: SearchRequest): boolean {
   );
 }
 
-export function canServeAccountsFeedWithoutX(request: AccountsFeedRequest): boolean {
+export async function canServeAccountsFeedWithoutX(
+  request: AccountsFeedRequest
+): Promise<boolean> {
   const plan = buildAccountsFeedPlan(request);
   if (plan.fresh) {
     return false;
@@ -336,21 +338,24 @@ export function canServeAccountsFeedWithoutX(request: AccountsFeedRequest): bool
   );
 }
 
-export function canServeThreadWithoutX(tweetIdInput: string, fresh: boolean): boolean {
+export async function canServeThreadWithoutX(
+  tweetIdInput: string,
+  fresh: boolean
+): Promise<boolean> {
   if (fresh) {
     return false;
   }
 
   const tweetId = parseTweetInput(tweetIdInput);
-  if (cache.has(threadCacheKey(tweetId))) {
+  if (await cache.has(threadCacheKey(tweetId))) {
     return true;
   }
 
-  if (!cache.has(tweetCacheKey(tweetId))) {
+  if (!(await cache.has(tweetCacheKey(tweetId)))) {
     return false;
   }
 
-  const cachedRoot = cache.get<{ tweet: Tweet }>(tweetCacheKey(tweetId));
+  const cachedRoot = await cache.get<{ tweet: Tweet }>(tweetCacheKey(tweetId));
   const conversationId = cachedRoot?.tweet?.conversation_id;
   if (!conversationId) {
     return false;
@@ -358,43 +363,47 @@ export function canServeThreadWithoutX(tweetIdInput: string, fresh: boolean): bo
 
   const conversationQuery = `conversation_id:${conversationId}`;
   return (
-    cache.has(
+    (await cache.has(
       searchAllCacheKey(conversationQuery, {
         maxPages: 2,
         maxResults: THREAD_RESULT_CAP,
         sort: "recency",
       })
-    ) ||
-    cache.has(
+    )) ||
+    (await cache.has(
       searchRecentCacheKey(conversationQuery, {
         maxPages: 2,
         maxResults: THREAD_RESULT_CAP,
         sort: "recency",
         since: "7d",
       })
-    )
+    ))
   );
 }
 
-export function canServeTrendingWithoutX(
+export async function canServeTrendingWithoutX(
   kind: StandardTrendingKind,
   request: TrendingRequest
-): boolean {
+): Promise<boolean> {
   const plan = buildTrendingPlan(kind, request);
   if (plan.fresh) {
     return false;
   }
 
-  return plan.queries.every((query) =>
-    cache.has(
-      searchRecentCacheKey(query, {
-        since: plan.window,
-        maxPages: 1,
-        maxResults: TRENDING_QUERY_CAP,
-        sort: "recency",
-      })
+  const cached = await Promise.all(
+    plan.queries.map((query) =>
+      cache.has(
+        searchRecentCacheKey(query, {
+          since: plan.window,
+          maxPages: 1,
+          maxResults: TRENDING_QUERY_CAP,
+          sort: "recency",
+        })
+      )
     )
   );
+
+  return cached.every(Boolean);
 }
 
 export async function fetchRead(tweetIdInput: string, fresh: boolean): Promise<ReadResult> {
@@ -490,7 +499,7 @@ export async function fetchThread(
 ): Promise<ThreadResult> {
   const tweetId = parseTweetInput(tweetIdInput);
   const cachedThread = !fresh
-    ? cache.get<{ tweets: Tweet[]; rootTweet: Tweet | null; partial: boolean }>(
+    ? await cache.get<{ tweets: Tweet[]; rootTweet: Tweet | null; partial: boolean }>(
         threadCacheKey(tweetId)
       )
     : null;
@@ -567,11 +576,15 @@ export async function fetchThread(
   );
   const partial = searchResult.tweets.length >= 190;
 
-  cache.set(threadCacheKey(tweetId), {
-    tweets,
-    rootTweet: rootResult.tweet,
-    partial,
-  }, cache.TTL.THREAD);
+  await cache.set(
+    threadCacheKey(tweetId),
+    {
+      tweets,
+      rootTweet: rootResult.tweet,
+      partial,
+    },
+    cache.TTL.THREAD
+  );
 
   return {
     data: tweets,

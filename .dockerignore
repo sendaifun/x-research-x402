@@ -1,0 +1,9 @@
+.git
+.github
+node_modules
+.env
+.env.local
+data/cache
+data/runtime
+references
+*.log
