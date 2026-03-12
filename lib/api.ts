@@ -39,12 +39,18 @@ export interface Tweet {
 }
 
 export interface SearchOptions {
-  sort?: "recency" | "relevancy";
+  sort?: "recency" | "relevancy" | "likes" | "retweets" | "impressions" | "bookmarks";
   since?: string; // "1h", "6h", "24h", "7d"
   maxPages?: number;
   maxResults?: number; // per page, 10-100
   startTime?: string; // ISO 8601
   endTime?: string;
+}
+
+export interface RequestControls {
+  forceFresh?: boolean;
+  cacheTtlMs?: number;
+  recordUsage?: boolean;
 }
 
 interface RawApiResponse {
@@ -191,9 +197,61 @@ const EXPANSIONS = "author_id";
 // API only accepts these sort values; anything else must be done locally
 const API_SORT_VALUES = new Set(["recency", "relevancy"]);
 
-export async function searchRecent(
+function shouldRecordUsage(controls?: RequestControls): boolean {
+  return controls?.recordUsage !== false;
+}
+
+export function searchRecentCacheKey(
   query: string,
   opts: SearchOptions = {}
+): string {
+  const requestedSort = opts.sort || "relevancy";
+  const totalLimit = opts.maxResults || 100;
+  const maxPages = Math.min(opts.maxPages || 1, Math.ceil(totalLimit / 10));
+  const maxResults = Math.max(10, Math.min(totalLimit, 100));
+  const cacheKeyTime = opts.startTime || opts.since || "";
+
+  return cache.cacheKey("search", {
+    query,
+    sort: requestedSort,
+    maxPages,
+    maxResults,
+    since: cacheKeyTime,
+  });
+}
+
+export function searchAllCacheKey(
+  query: string,
+  opts: SearchOptions = {}
+): string {
+  const totalLimit = opts.maxResults || 100;
+  const maxPages = Math.min(opts.maxPages || 1, Math.ceil(totalLimit / 10));
+  const maxResults = Math.max(10, Math.min(totalLimit, 100));
+  const sort = opts.sort || "recency";
+
+  return cache.cacheKey("search_all", { query, sort, maxPages, maxResults });
+}
+
+export function tweetCacheKey(tweetId: string): string {
+  return cache.cacheKey("tweet", { tweetId });
+}
+
+export function batchTweetsCacheKey(tweetIds: string[]): string {
+  return cache.cacheKey("batch", { ids: [...tweetIds].sort().join(",") });
+}
+
+export function threadCacheKey(tweetId: string): string {
+  return cache.cacheKey("thread", { tweetId });
+}
+
+export function profileCacheKey(username: string): string {
+  return cache.cacheKey("profile", { username });
+}
+
+export async function searchRecent(
+  query: string,
+  opts: SearchOptions = {},
+  controls?: RequestControls
 ): Promise<{ tweets: Tweet[]; rawCount: number; cached: boolean }> {
   const requestedSort = opts.sort || "relevancy";
   // Use relevancy for API call if the requested sort isn't API-supported
@@ -223,11 +281,12 @@ export async function searchRecent(
   }
 
   // Cache check — key on `since` string (not computed startTime) for stable cache hits
-  const cacheKeyTime = opts.startTime || since || "";
-  const ck = cache.cacheKey("search", { query, sort: requestedSort, maxPages, maxResults, since: cacheKeyTime });
-  const cached = cache.get<{ tweets: Tweet[]; rawCount: number }>(ck);
-  if (cached) {
-    return { ...cached, cached: true };
+  const ck = searchRecentCacheKey(query, opts);
+  if (!controls?.forceFresh) {
+    const cached = await cache.get<{ tweets: Tweet[]; rawCount: number }>(ck);
+    if (cached) {
+      return { ...cached, cached: true };
+    }
   }
 
   // Paginated fetch
@@ -281,11 +340,14 @@ export async function searchRecent(
   }
 
   // Record cost
-  recordUsage(rawCount, query);
+  if (shouldRecordUsage(controls)) {
+    await recordUsage(rawCount, query);
+  }
 
   // Cache result
-  const ttl = maxPages === 1 ? cache.TTL.QUICK : cache.TTL.FULL;
-  cache.set(ck, { tweets: finalTweets, rawCount }, ttl);
+  const ttl =
+    controls?.cacheTtlMs ?? (totalLimit <= 20 ? cache.TTL.QUICK : cache.TTL.FULL);
+  await cache.set(ck, { tweets: finalTweets, rawCount }, ttl);
 
   return { tweets: finalTweets, rawCount, cached: false };
 }
@@ -293,11 +355,14 @@ export async function searchRecent(
 // --- Single Tweet Lookup ($0.005) ---
 
 export async function getTweet(
-  tweetId: string
+  tweetId: string,
+  controls?: RequestControls
 ): Promise<{ tweet: Tweet | null; cached: boolean }> {
-  const ck = cache.cacheKey("tweet", { tweetId });
-  const cached = cache.get<{ tweet: Tweet }>(ck);
-  if (cached) return { ...cached, cached: true };
+  const ck = tweetCacheKey(tweetId);
+  if (!controls?.forceFresh) {
+    const cached = await cache.get<{ tweet: Tweet }>(ck);
+    if (cached) return { ...cached, cached: true };
+  }
 
   const url = `${BASE_URL}/tweets/${tweetId}?tweet.fields=${TWEET_FIELDS}&user.fields=${USER_FIELDS}&expansions=${EXPANSIONS}`;
   const res = await apiGet(url);
@@ -305,8 +370,10 @@ export async function getTweet(
   const tweet = tweets[0] || null;
 
   if (tweet) {
-    recordUsage(1, `tweet:${tweetId}`);
-    cache.set(ck, { tweet }, cache.TTL.THREAD);
+    if (shouldRecordUsage(controls)) {
+      await recordUsage(1, `tweet:${tweetId}`);
+    }
+    await cache.set(ck, { tweet }, controls?.cacheTtlMs ?? cache.TTL.READ);
   }
 
   return { tweet, cached: false };
@@ -315,21 +382,26 @@ export async function getTweet(
 // --- Batch Tweet Lookup (up to 100 IDs, $0.005/tweet) ---
 
 export async function getBatchTweets(
-  tweetIds: string[]
+  tweetIds: string[],
+  controls?: RequestControls
 ): Promise<{ tweets: Tweet[]; cached: boolean }> {
   if (tweetIds.length === 0) return { tweets: [], cached: true };
   if (tweetIds.length > 100) tweetIds = tweetIds.slice(0, 100);
 
-  const ck = cache.cacheKey("batch", { ids: tweetIds.sort().join(",") });
-  const cached = cache.get<{ tweets: Tweet[] }>(ck);
-  if (cached) return { ...cached, cached: true };
+  const ck = batchTweetsCacheKey(tweetIds);
+  if (!controls?.forceFresh) {
+    const cached = await cache.get<{ tweets: Tweet[] }>(ck);
+    if (cached) return { ...cached, cached: true };
+  }
 
   const url = `${BASE_URL}/tweets?ids=${tweetIds.join(",")}&tweet.fields=${TWEET_FIELDS}&user.fields=${USER_FIELDS}&expansions=${EXPANSIONS}`;
   const res = await apiGet(url);
   const tweets = parseTweets(res);
 
-  recordUsage(tweets.length, `batch:${tweetIds.length}ids`);
-  cache.set(ck, { tweets }, cache.TTL.THREAD);
+  if (shouldRecordUsage(controls)) {
+    await recordUsage(tweets.length, `batch:${tweetIds.length}ids`);
+  }
+  await cache.set(ck, { tweets }, controls?.cacheTtlMs ?? cache.TTL.THREAD);
 
   return { tweets, cached: false };
 }
@@ -338,16 +410,19 @@ export async function getBatchTweets(
 
 export async function searchAll(
   query: string,
-  opts: SearchOptions = {}
+  opts: SearchOptions = {},
+  controls?: RequestControls
 ): Promise<{ tweets: Tweet[]; rawCount: number; cached: boolean }> {
   const totalLimit = opts.maxResults || 100;
   const maxPages = Math.min(opts.maxPages || 1, Math.ceil(totalLimit / 10));
   const maxResults = Math.max(10, Math.min(totalLimit, 100));
   const sort = opts.sort || "recency";
 
-  const ck = cache.cacheKey("search_all", { query, sort, maxPages, maxResults });
-  const cached = cache.get<{ tweets: Tweet[]; rawCount: number }>(ck);
-  if (cached) return { ...cached, cached: true };
+  const ck = searchAllCacheKey(query, opts);
+  if (!controls?.forceFresh) {
+    const cached = await cache.get<{ tweets: Tweet[]; rawCount: number }>(ck);
+    if (cached) return { ...cached, cached: true };
+  }
 
   const allTweets: Tweet[] = [];
   let rawCount = 0;
@@ -382,8 +457,10 @@ export async function searchAll(
   if (allTweets.length > totalLimit) allTweets.length = totalLimit;
 
   const deduped = dedupe(allTweets);
-  recordUsage(rawCount, query);
-  cache.set(ck, { tweets: deduped, rawCount }, cache.TTL.THREAD);
+  if (shouldRecordUsage(controls)) {
+    await recordUsage(rawCount, query);
+  }
+  await cache.set(ck, { tweets: deduped, rawCount }, controls?.cacheTtlMs ?? cache.TTL.THREAD);
 
   return { tweets: deduped, rawCount, cached: false };
 }
@@ -391,14 +468,17 @@ export async function searchAll(
 // --- Thread (uses full-archive search — no 7-day limit) ---
 
 export async function getThread(
-  tweetId: string
+  tweetId: string,
+  controls?: RequestControls
 ): Promise<{ tweets: Tweet[]; rootTweet: Tweet | null; partial: boolean; cached: boolean }> {
-  const ck = cache.cacheKey("thread", { tweetId });
-  const cached = cache.get<{ tweets: Tweet[]; rootTweet: Tweet | null; partial: boolean }>(ck);
-  if (cached) return { ...cached, cached: true };
+  const ck = threadCacheKey(tweetId);
+  if (!controls?.forceFresh) {
+    const cached = await cache.get<{ tweets: Tweet[]; rootTweet: Tweet | null; partial: boolean }>(ck);
+    if (cached) return { ...cached, cached: true };
+  }
 
   // Fetch the root tweet ($0.005)
-  const rootResult = await getTweet(tweetId);
+  const rootResult = await getTweet(tweetId, controls);
   const rootTweet = rootResult.tweet;
 
   if (!rootTweet) {
@@ -409,11 +489,19 @@ export async function getThread(
   const convQuery = `conversation_id:${rootTweet.conversation_id}`;
   let result: { tweets: Tweet[]; rawCount: number; cached: boolean };
   try {
-    result = await searchAll(convQuery, { maxPages: 2, sort: "recency", maxResults: 100 });
+    result = await searchAll(
+      convQuery,
+      { maxPages: 2, sort: "recency", maxResults: 100 },
+      controls
+    );
   } catch (err: any) {
     // Fall back to recent search if full-archive isn't available on this tier
     if (err.message.includes("403") || err.message.includes("not available")) {
-      result = await searchRecent(convQuery, { maxPages: 2, sort: "recency", since: "7d" });
+      result = await searchRecent(
+        convQuery,
+        { maxPages: 2, sort: "recency", since: "7d" },
+        controls
+      );
     } else {
       throw err;
     }
@@ -424,18 +512,25 @@ export async function getThread(
   const allTweets = [rootTweet, ...result.tweets.filter(t => t.id !== rootTweet.id)];
   allTweets.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-  cache.set(ck, { tweets: allTweets, rootTweet, partial }, cache.TTL.THREAD);
+  await cache.set(
+    ck,
+    { tweets: allTweets, rootTweet, partial },
+    controls?.cacheTtlMs ?? cache.TTL.THREAD
+  );
   return { tweets: allTweets, rootTweet, partial, cached: false };
 }
 
 // --- Profile ---
 
 export async function getProfile(
-  username: string
+  username: string,
+  controls?: RequestControls
 ): Promise<{ user: Tweet["author"]; recentTweets: Tweet[]; cached: boolean }> {
-  const ck = cache.cacheKey("profile", { username });
-  const cached = cache.get<{ user: Tweet["author"]; recentTweets: Tweet[] }>(ck);
-  if (cached) return { ...cached, cached: true };
+  const ck = profileCacheKey(username);
+  if (!controls?.forceFresh) {
+    const cached = await cache.get<{ user: Tweet["author"]; recentTweets: Tweet[] }>(ck);
+    if (cached) return { ...cached, cached: true };
+  }
 
   // User lookup
   const userUrl = `${BASE_URL}/users/by/username/${username.replace("@", "")}?user.fields=${USER_FIELDS}`;
@@ -462,8 +557,10 @@ export async function getProfile(
   const tweetsRes = await apiGet(tweetsUrl);
   const recentTweets = parseTweets(tweetsRes);
 
-  recordUsage(recentTweets.length + 1);
-  cache.set(ck, { user, recentTweets }, cache.TTL.PROFILE);
+  if (shouldRecordUsage(controls)) {
+    await recordUsage(recentTweets.length + 1);
+  }
+  await cache.set(ck, { user, recentTweets }, controls?.cacheTtlMs ?? cache.TTL.PROFILE);
   return { user, recentTweets, cached: false };
 }
 

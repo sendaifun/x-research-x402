@@ -121,9 +121,10 @@ lib/
   tweetrank.ts        Credibility scoring + raid detection
   extract.ts          Multi-signal extraction (tickers, CAs, URLs, name-phrases)
   filters.ts          Crypto noise filters + engagement thresholds
-  cache.ts            File-based MD5 caching with TTL tiers
-  cost.ts             Credit tracking
+  cache.ts            Redis-backed cache with local-file fallback
+  cost.ts             Redis-backed usage tracking with local-file fallback
   format.ts           Structured output with trust labels
+  runtime-store.ts    Redis-backed sessions, balances, reservations, top-ups
 data/
   watchlist.default.json   Default CT accounts (shipped)
   known-tokens.json        Token name-to-ticker mappings
@@ -136,3 +137,134 @@ install.sh            One-line shell installer
 
 - [Bun](https://bun.sh) v1.0+
 - X API Bearer Token ([developer.x.com](https://developer.x.com), pay-per-use via xAI)
+
+## HTTP API
+
+`ct-alpha` now also ships a Bun + Hono HTTP server with two API surfaces:
+
+- `GET /x402/*`
+  Fixed-price x402 endpoints for standard clients.
+- `GET /metered/*`
+  Session-authenticated metered endpoints for internal tooling, backed by a wallet credit ledger.
+
+### Required env
+
+```bash
+cp .env.example .env
+```
+
+- `X_BEARER_TOKEN`
+- `X402_FACILITATOR_URL`
+- `X402_PAY_TO`
+- `X402_NETWORK` (`mainnet` by default, or `devnet`/`testnet`)
+- `REDIS_URL` (recommended for any hosted deployment)
+- `REDIS_PREFIX` (optional, defaults to `ct-alpha`)
+- `PORT` (optional, defaults to `3000`)
+
+### Run the API
+
+```bash
+bun install
+bun run dev:api
+```
+
+### Docker + Redis
+
+Local containerized stack:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+This starts:
+
+- the Bun API on `http://localhost:3000`
+- Redis on `localhost:6379`
+
+The compose stack injects `REDIS_URL=redis://redis:6379` for the API container.
+
+For production:
+
+- run the same image behind HTTPS
+- inject secrets from your secret manager instead of a checked-in `.env`
+- point `REDIS_URL` at your managed Redis instance
+- keep `X_BEARER_TOKEN`, `X402_FACILITATOR_URL`, and `X402_PAY_TO` in the secret manager
+
+### Standard x402 routes
+
+- `GET /x402/read?tweetId=...`
+- `GET /x402/search/20?q=...`
+- `GET /x402/search/100?q=...`
+- `GET /x402/accounts-feed/20?accounts=a,b,c`
+- `GET /x402/accounts-feed/100?accounts=a,b,c`
+- `GET /x402/thread/100?tweetId=...`
+- `GET /x402/trending/solana?window=6h`
+- `GET /x402/trending/general?window=6h`
+
+All standard routes support `fresh=true`. Cache-served responses bypass x402 and return for free.
+
+### Metered routes
+
+- `POST /metered/auth/siwx`
+- `GET /metered/credits/balance`
+- `POST /metered/credits/topup/5`
+- `POST /metered/credits/topup/10`
+- `POST /metered/credits/topup/25`
+- `POST /metered/credits/topup/50`
+- `GET /metered/read?tweetId=...`
+- `GET /metered/search?q=...&limit=20`
+- `GET /metered/accounts-feed?accounts=a,b,c&limit=20`
+- `GET /metered/thread?tweetId=...`
+- `GET /metered/trending?solanaOnly=true`
+
+Metered requests use:
+
+1. `POST /metered/auth/siwx` with a `SIGN-IN-WITH-X` header.
+2. `Authorization: Bearer <session_token>` on subsequent metered and top-up routes.
+3. `402 Payment Required` on insufficient balance, with top-up suggestions in the JSON body.
+
+### Shared metered client helper
+
+Internal tooling can use the shared helper in `lib/metered-client.ts`. It handles:
+
+- SIWx auth for `/metered/auth/siwx`
+- bearer session headers for metered routes
+- x402-paid top-ups, including the required `payment-identifier` extension
+- typed convenience methods for `read`, `search`, `accounts-feed`, `thread`, and `trending`
+
+```ts
+import { readFileSync } from "fs";
+import { createKeyPairSignerFromBytes } from "@solana/kit";
+import { toClientSvmSigner } from "@x402/svm";
+import { ApiResponseError, MeteredApiClient } from "./lib/metered-client";
+
+const payerSecret = new Uint8Array(
+  JSON.parse(readFileSync("./data/runtime/devnet-payer.json", "utf-8"))
+);
+const payerSigner = toClientSvmSigner(await createKeyPairSignerFromBytes(payerSecret));
+
+const client = new MeteredApiClient({
+  baseUrl: "http://localhost:3000",
+  paymentSigner: payerSigner,
+});
+
+const auth = await client.authenticate();
+
+try {
+  const result = await client.search(auth.session.sessionToken, {
+    q: "solana",
+    limit: 20,
+    since: "24h",
+    fresh: true,
+  });
+
+  console.log(result.body.meta);
+} catch (error) {
+  if (error instanceof ApiResponseError && error.status === 402) {
+    await client.topup(auth.session.sessionToken, 5);
+  } else {
+    throw error;
+  }
+}
+```
