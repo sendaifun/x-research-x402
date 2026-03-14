@@ -147,6 +147,8 @@ install.sh            One-line shell installer
 - `GET /metered/*`
   Session-authenticated metered endpoints for internal tooling, backed by a wallet credit ledger.
 
+Hosted public standard endpoint: `https://x-research.suzi.trade`
+
 ### Required env
 
 ```bash
@@ -193,6 +195,8 @@ For production:
 
 ### Standard x402 routes
 
+Hosted base URL for public standard routes: `https://x-research.suzi.trade`
+
 - `GET /x402/read?tweetId=...`
 - `GET /x402/search/20?q=...`
 - `GET /x402/search/100?q=...`
@@ -203,6 +207,18 @@ For production:
 - `GET /x402/trending/general?window=6h`
 
 All standard routes support `fresh=true`. Cache-served responses bypass x402 and return for free.
+
+Example hosted request:
+
+```text
+https://x-research.suzi.trade/x402/search/20?q=solana&since=24h
+```
+
+Script defaults:
+
+- `bun run e2e:devnet` targets the hosted standard endpoint by default.
+- `bun run e2e:all:devnet` stays local-first for full standard + metered coverage, but switches to the hosted endpoint by default when `X402_E2E_SCOPE=standard`.
+- Override either script with `CT_ALPHA_BASE_URL` or the more specific `X402_E2E_URL` / `X402_E2E_BASE_URL`.
 
 ### Metered routes
 
@@ -245,7 +261,7 @@ const payerSecret = new Uint8Array(
 const payerSigner = toClientSvmSigner(await createKeyPairSignerFromBytes(payerSecret));
 
 const client = new MeteredApiClient({
-  baseUrl: "http://localhost:3000",
+  baseUrl: process.env.CT_ALPHA_BASE_URL || "http://localhost:3000",
   paymentSigner: payerSigner,
 });
 

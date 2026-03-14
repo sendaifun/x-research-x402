@@ -6,7 +6,12 @@ import { paymentMiddleware, x402ResourceServer } from "@x402/hono";
 import { paymentIdentifierResourceServerExtension, extractAndValidatePaymentIdentifier } from "@x402/extensions/payment-identifier";
 import { ExactSvmScheme } from "@x402/svm/exact/server";
 import { handleSiwxAuth, requireSession, type ApiEnv } from "./lib/http-auth";
-import { buildAgentDocsResponse, buildServiceStatus } from "./lib/http-public-docs";
+import {
+  buildAgentDocsResponse,
+  buildOpenApiResponse,
+  buildServiceStatus,
+  buildWellKnownX402Response,
+} from "./lib/http-public-docs";
 import {
   HttpValidationError,
   canServeAccountsFeedWithoutX,
@@ -566,6 +571,8 @@ app.onError((error, c) => {
 app.get("/", (c) => c.json(buildServiceStatus(network)));
 
 app.get("/docs.md", () => buildAgentDocsResponse(network));
+app.get("/openapi.json", (c) => buildOpenApiResponse(getOrigin(c), network));
+app.get("/.well-known/x402", () => buildWellKnownX402Response());
 
 app.post("/metered/auth/siwx", withErrors((c) => handleSiwxAuth(c, network)));
 app.get("/metered/credits/balance", requireSession, withErrors(handleBalance));

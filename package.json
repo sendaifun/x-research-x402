@@ -6,9 +6,7 @@
   "scripts": {
     "dev:api": "bun run server.ts",
     "check": "bunx tsc --noEmit",
-    "test": "bun test",
-    "e2e:devnet": "bun run scripts/e2e-devnet.ts",
-    "e2e:all:devnet": "bun run scripts/e2e-all-devnet.ts"
+    "test": "bun test"
   },
   "dependencies": {
     "@solana/kit": "^5.4.0",
