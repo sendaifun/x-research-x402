@@ -37,6 +37,38 @@ type PublicStandardRouteDoc = {
   exampleOutput: unknown;
 };
 
+type OpenApiParameter = {
+  name: string;
+  in: "query";
+  required?: boolean;
+  description?: string;
+  schema: Record<string, unknown>;
+  example?: unknown;
+};
+
+type OpenApiOperation = {
+  operationId: string;
+  tags: string[];
+  summary: string;
+  description: string;
+  parameters: OpenApiParameter[];
+  requestBody: {
+    required: boolean;
+    content: {
+      "application/json": {
+        schema: QuerySchema;
+        example: Record<string, unknown>;
+      };
+    };
+  };
+  responses: Record<string, unknown>;
+  "x-payment-info": {
+    protocols: ["x402"];
+    pricingMode: "fixed";
+    price: string;
+  };
+};
+
 export const DOCS_CONTENT_TYPE = "text/markdown; charset=utf-8";
 
 const SAMPLE_TWEET = {
@@ -353,6 +385,137 @@ export const PUBLIC_STANDARD_ROUTE_DOCS: PublicStandardRouteDoc[] = [
   },
 ];
 
+function routeOperationId(route: PublicStandardRouteDoc): string {
+  return route.path
+    .replace(/^\//, "")
+    .replace(/[/-]+(.)/g, (_, chr: string) => chr.toUpperCase())
+    .replace(/[^a-zA-Z0-9]/g, "");
+}
+
+function propertySchemaToOpenApiSchema(
+  value: unknown
+): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { type: "string" };
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function buildQueryParameters(route: PublicStandardRouteDoc): OpenApiParameter[] {
+  const required = new Set(route.requiredParams);
+  return Object.entries(route.inputSchema.properties).map(([name, schema]) => ({
+    name,
+    in: "query",
+    required: required.has(name),
+    description:
+      typeof schema === "object" &&
+      schema !== null &&
+      "description" in schema &&
+      typeof (schema as { description?: unknown }).description === "string"
+        ? (schema as { description: string }).description
+        : undefined,
+    schema: propertySchemaToOpenApiSchema(schema),
+    example: route.input[name],
+  }));
+}
+
+function buildRouteOperation(route: PublicStandardRouteDoc): OpenApiOperation {
+  return {
+    operationId: routeOperationId(route),
+    tags: ["x402", "ct-alpha"],
+    summary: route.title,
+    description: `${route.description} Send fields as query params on the wire for this GET route.`,
+    parameters: buildQueryParameters(route),
+    requestBody: {
+      required: route.requiredParams.length > 0,
+      content: {
+        "application/json": {
+          schema: route.inputSchema,
+          example: route.input,
+        },
+      },
+    },
+    responses: {
+      "200": {
+        description: "Successful response.",
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              additionalProperties: true,
+            },
+            example: route.exampleOutput,
+          },
+        },
+      },
+      "400": {
+        description: "Invalid request.",
+      },
+      "402": {
+        description: "Payment Required",
+      },
+      "404": {
+        description: "Requested resource not found.",
+      },
+      "429": {
+        description: "Rate limited by the upstream X API.",
+      },
+      "500": {
+        description: "Server error.",
+      },
+    },
+    "x-payment-info": {
+      protocols: ["x402"],
+      pricingMode: "fixed",
+      price: route.priceUsd,
+    },
+  };
+}
+
+export function buildOpenApiDocument(origin: string, network: string) {
+  const paths = Object.fromEntries(
+    PUBLIC_STANDARD_ROUTE_DOCS.map((route) => [
+      route.path,
+      {
+        get: buildRouteOperation(route),
+      },
+    ])
+  );
+
+  return {
+    openapi: "3.1.0",
+    info: {
+      title: "ct-alpha Public x402 API",
+      version: "1.0.0",
+      description:
+        "Public ct-alpha routes for crypto Twitter search, account feeds, thread reads, single-post reads, and trending discovery.",
+      guidance: [
+        "Use the concrete /x402/* routes only. Do not call the bare /x402 prefix.",
+        "Construct the request from the requestBody schema, then send the values as query params because the public routes are GET endpoints.",
+        "Start with /x402/search/20 for most research tasks.",
+        "Use fresh=true only when the caller explicitly wants a live fetch instead of cached data.",
+        "If a route returns 402 Payment Required, pay for that exact method, path, and query string, then retry the same request.",
+        "Treat CT findings as leads to verify, not ground truth.",
+      ].join("\n"),
+    },
+    servers: [
+      {
+        url: origin,
+        description: `ct-alpha deployment on ${network}`,
+      },
+    ],
+    paths,
+  };
+}
+
+export function buildWellKnownX402Document() {
+  return {
+    version: 1,
+    resources: PUBLIC_STANDARD_ROUTE_DOCS.map((route) => route.routeKey),
+  };
+}
+
 export function getStandardRouteDiscoveryExtension(routeKey: StandardRouteKey) {
   const route = PUBLIC_STANDARD_ROUTE_DOCS.find((entry) => entry.routeKey === routeKey);
   if (!route) {
@@ -443,6 +606,22 @@ export function buildAgentDocsResponse(network: string): Response {
   return new Response(renderAgentDocsMarkdown(network), {
     headers: {
       "Content-Type": DOCS_CONTENT_TYPE,
+    },
+  });
+}
+
+export function buildOpenApiResponse(origin: string, network: string): Response {
+  return new Response(JSON.stringify(buildOpenApiDocument(origin, network), null, 2), {
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+    },
+  });
+}
+
+export function buildWellKnownX402Response(): Response {
+  return new Response(JSON.stringify(buildWellKnownX402Document()), {
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
     },
   });
 }

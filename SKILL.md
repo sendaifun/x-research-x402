@@ -42,6 +42,22 @@ bun run ~/ct-alpha/setup.ts
 
 The skill directory is at `~/ct-alpha/`. All CLI commands run from there.
 
+## Hosted x402 API
+
+Use the hosted standard x402 surface when the task is to consume ct-alpha over HTTP instead of running the local CLI.
+
+- Hosted base URL: `https://x-research.suzi.trade`
+- Public standard routes live under: `https://x-research.suzi.trade/x402/*`
+- Call a concrete route, not the bare prefix. Example: `https://x-research.suzi.trade/x402/search/20?q=solana&since=24h`
+- Add `fresh=true` when the user explicitly wants a live fetch instead of a cached response
+- Treat `/metered/*` as internal tooling unless the task is specifically about the metered auth/top-up flow
+
+For x402 clients, follow the standard flow:
+1. Send the request to the exact `https://x-research.suzi.trade/x402/*` route.
+2. If the response is `402 Payment Required`, read the payment requirements from the response.
+3. Pay for that exact method + path + query string.
+4. Retry the same request with the x402 payment header(s).
+
 ## CLI Reference
 
 ### search — Core research command
