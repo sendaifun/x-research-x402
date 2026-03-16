@@ -143,6 +143,8 @@ source ~/.config/env/global.env 2>/dev/null && bun run ~/ct-alpha/ct-search.ts s
 ```
 
 **CRITICAL: Query string rules**
+- **Twitter v2 AND-joins every bare word.** A query like `polymarket sure bet 90 percent free money` requires ALL 7 words in a single tweet — result: 0 hits. Keep to 2-3 AND-ed terms max, use OR groups for synonyms: `polymarket ("free money" OR "easy bet" OR "sure thing")`
+- **Never pass the user's raw question as the query.** Decompose it into search terms first. See `references/query-templates.md` "Query Anti-Patterns" section.
 - The query argument should contain ONLY search terms, boolean logic (`OR`, `-`, `"phrases"`), and v2 operators (`from:`, `is:retweet`, `has:links`, `lang:`, `conversation_id:`, `$cashtag`, `#hashtag`)
 - **NEVER put these v1.1 operators in the query string — they do NOT exist on v2 pay-per-use and will cause 400 errors:**
   - `min_faves:N`, `min_retweets:N`, `min_replies:N` — use `--min-likes` CLI flag instead (filters client-side)

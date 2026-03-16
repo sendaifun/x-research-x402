@@ -73,6 +73,40 @@ Use `--from` flag with watchlist accounts:
 bun run ct-search.ts search "$TOKEN alpha" --from user1,user2,user3 --quick
 ```
 
+## Query Anti-Patterns (Avoid These)
+
+Twitter v2 search uses **AND logic by default** — every bare word in the query must appear in the tweet. Long natural-language queries silently return 0 results because no single tweet contains all the terms. The noise filters auto-appended by `lib/filters.ts` make this worse by adding even more required operators.
+
+### Bad: Long natural-language queries
+```
+polymarket sure bet 90 percent free money march 2026
+```
+This requires a tweet to contain ALL of: "polymarket", "sure", "bet", "90", "percent", "free", "money", "march", "2026". Result: 0 tweets.
+
+### Bad: Dumping the user's question verbatim
+```
+what are the best high conviction bets on polymarket right now
+```
+Same problem — 10 AND-ed terms, no tweet will match.
+
+### Good: 1-2 anchor terms + OR groups for intent
+```
+polymarket ("free money" OR "easy bet" OR "guaranteed" OR "sure thing")
+```
+
+### Good: Separate queries for separate intents
+Instead of one mega-query, run two focused searches:
+```
+polymarket (mispriced OR "no brainer" OR "free money")
+polymarket (alpha OR edge OR "high conviction")
+```
+
+### Rule of thumb
+- **Max 2-3 AND-ed terms** outside of OR groups
+- **Use OR groups** `(term1 OR term2 OR term3)` for synonyms/variants
+- **Use quotes** `"exact phrase"` only for multi-word phrases people actually write
+- **Never pass the user's raw question** as the query string — decompose it into search terms first
+
 ## Tips for Query Optimization
 
 1. **Start narrow**: Use specific ticker + context words. Broaden only if <10 results.
