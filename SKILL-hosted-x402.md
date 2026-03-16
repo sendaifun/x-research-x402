@@ -119,6 +119,8 @@ Hosted equivalent of `ct-search.ts search`.
 
 Use `/x402/search/20` first. It is the hosted equivalent of quick mode and should be the default first pass.
 
+**Critical: Query construction rules.** Twitter v2 search AND-joins every bare word. Long natural-language queries return 0 results because no tweet contains all terms. You MUST read `references/query-templates.md` (especially the "Query Anti-Patterns" section) before constructing any `q` parameter. Keep queries to 2-3 AND-ed terms max, use OR groups for synonyms, and never pass the user's raw question as the query string.
+
 Query params:
 
 - `q` required
